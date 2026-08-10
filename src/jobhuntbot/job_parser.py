@@ -44,6 +44,93 @@ _LICENSE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EDUCATION_PATTERNS = {
+    "high school": re.compile(r"\bhigh\s+school\s+(?:diploma|degree|education|graduate)\b", re.IGNORECASE),
+    "associate": re.compile(r"\bassociate(?:'s)?\s+degree\b", re.IGNORECASE),
+    "bachelor": re.compile(
+        r"\b(?:bachelor(?:'s)?\s+degree|bachelor\s+of\s+(?:arts|science)|"
+        r"b\.?\s*[as]\.?(?:\s+degree)?|undergraduate\s+degree)\b",
+        re.IGNORECASE,
+    ),
+    "master": re.compile(
+        r"\b(?:master(?:'s)\s*(?:degree)?|master\s+(?:degree|of\s+(?:arts|science))|"
+        r"m\.?\s*s\.?(?:\s+degree)?|ms\s+degree|graduate\s+degree)\b",
+        re.IGNORECASE,
+    ),
+    "mba": re.compile(r"\b(?:mba|master\s+of\s+business\s+administration)\b", re.IGNORECASE),
+    "phd": re.compile(r"\b(?:ph\.?\s*d\.?|doctor\s+of\s+philosophy)\b", re.IGNORECASE),
+    "doctorate": re.compile(r"\bdoctorate(?:\s+degree)?\b", re.IGNORECASE),
+}
+
+_REQUIRED_SECTION_HEADINGS = {
+    "requirements",
+    "required qualifications",
+    "minimum qualifications",
+    "basic qualifications",
+    "qualifications",
+    "profile",
+    "job responsibilities",
+    "key responsibilities",
+    "responsibilities",
+    "duties",
+    "what you will do",
+    "what you ll do",
+}
+_PREFERRED_SECTION_HEADINGS = {
+    "preferred",
+    "preferred skills",
+    "preferred qualifications",
+    "desired qualifications",
+    "nice to have",
+    "bonus qualifications",
+}
+_GENERAL_SECTION_HEADINGS = {
+    "company description",
+    "who we are",
+    "about us",
+    "job description",
+    "what you will learn",
+    "what you will achieve",
+    "physical requirements",
+    "additional information",
+    "what we offer you",
+    "benefits",
+}
+_ROLE_CONTEXT_START_HEADINGS = {
+    "about the role",
+    "role overview",
+    "position summary",
+    "main job objective",
+    "job description",
+    *_REQUIRED_SECTION_HEADINGS,
+}
+_ROLE_CONTEXT_STOP_HEADINGS = {
+    "additional information",
+    "what we offer you",
+    "benefits",
+    "what you will learn",
+    "what you will achieve",
+    "physical requirements",
+    "company description",
+    "who we are",
+    "about us",
+}
+_INDUSTRY_CONTEXT_STOP_HEADINGS = {
+    "main job objective",
+    "job description",
+    "requirements",
+    "qualifications",
+    "profile",
+    "job responsibilities",
+    "key responsibilities",
+    "responsibilities",
+    "duties",
+    "physical requirements",
+    "additional information",
+    "what we offer you",
+    "benefits",
+}
+
 
 def _salary_number(value: str | None) -> float | None:
     if not value:
@@ -59,6 +146,68 @@ def _sentence_evidence(text: str, term: str) -> str:
         if term.casefold() in line.casefold():
             return normalize_space(line)
     return ""
+
+
+def _heading_key(value: str) -> str:
+    return normalize_text_key(value).strip()
+
+
+def _matches_heading(value: str, headings: set[str]) -> bool:
+    key = _heading_key(value)
+    return any(key == heading or key.startswith(f"{heading} ") for heading in headings)
+
+
+def _contains_marker(value: str, markers: list[str]) -> bool:
+    return any(
+        re.search(r"(?<!\w)" + re.escape(marker.casefold()) + r"(?!\w)", value.casefold())
+        for marker in markers
+        if marker
+    )
+
+
+def _contains_phrase(value: str, phrase: str) -> bool:
+    key = normalize_text_key(value)
+    phrase_key = normalize_text_key(phrase)
+    return bool(
+        phrase_key
+        and re.search(r"(?<!\w)" + re.escape(phrase_key) + r"(?!\w)", key)
+    )
+
+
+def _role_context_lines(text: str) -> list[str]:
+    active = False
+    values: list[str] = []
+    for raw_line in text.splitlines():
+        line = normalize_space(raw_line)
+        if not line:
+            continue
+        if _matches_heading(line, _ROLE_CONTEXT_STOP_HEADINGS):
+            active = False
+        if _matches_heading(line, _ROLE_CONTEXT_START_HEADINGS):
+            active = True
+            continue
+        if active:
+            values.append(line)
+    return values
+
+
+def _industry_context_lines(text: str) -> list[str]:
+    values: list[str] = []
+    for raw_line in text.splitlines():
+        line = normalize_space(raw_line)
+        if not line:
+            continue
+        if _matches_heading(line, _INDUSTRY_CONTEXT_STOP_HEADINGS):
+            break
+        values.append(line)
+        if len(values) >= 20:
+            break
+    values.extend(
+        normalize_space(line)
+        for line in text.splitlines()
+        if re.search(r"\b(?:industry|sector)\b", line, re.IGNORECASE)
+    )
+    return list(dict.fromkeys(values))
 
 
 class DeterministicJobParser:
@@ -157,14 +306,25 @@ class DeterministicJobParser:
         return ExperienceRequirement(minimum_years=minimum, maximum_years=maximum, raw_text=raw)
 
     def _parse_education(self, text: str, evidence: dict[str, list[str]]) -> list[str]:
-        lowered = text.casefold()
-        found = []
-        for term in self.config.parser.get("education_terms", []):
-            if re.search(r"(?<!\w)" + re.escape(term.casefold()) + r"(?!\w)", lowered):
-                found.append(normalize_text_key(term))
-        if found:
-            evidence["education_required"] = [item for item in (_sentence_evidence(text, term) for term in found) if item]
-        return list(dict.fromkeys(found))
+        normalized_text = text.replace("’", "'")
+        configured = {
+            normalize_text_key(term) for term in self.config.parser.get("education_terms", [])
+        }
+        found: list[str] = []
+        found_evidence: list[str] = []
+        for level, pattern in _EDUCATION_PATTERNS.items():
+            if level not in configured:
+                continue
+            match = pattern.search(normalized_text)
+            if not match:
+                continue
+            found.append(level)
+            source_line = _sentence_evidence(normalized_text, match.group(0))
+            if source_line:
+                found_evidence.append(source_line)
+        if found_evidence:
+            evidence["education_required"] = list(dict.fromkeys(found_evidence))
+        return found
 
     def _parse_skills(self, text: str, evidence: dict[str, list[str]]) -> tuple[list[str], list[str]]:
         required: list[str] = []
@@ -180,23 +340,40 @@ class DeterministicJobParser:
             lowered = line.casefold()
             if not line:
                 continue
-            if any(marker in lowered for marker in preferred_markers):
+
+            if _matches_heading(line, _PREFERRED_SECTION_HEADINGS):
                 section = "preferred"
-            elif any(marker in lowered for marker in required_markers):
+            elif _matches_heading(line, _REQUIRED_SECTION_HEADINGS):
                 section = "required"
+            elif _matches_heading(line, _GENERAL_SECTION_HEADINGS):
+                section = "general"
 
             line_skills: list[str] = []
             for term in self.known_skills:
                 if re.search(r"(?<![A-Za-z0-9])" + re.escape(term.casefold()) + r"(?![A-Za-z0-9])", lowered):
                     line_skills.append(normalize_skill(term, self.aliases))
+            line_skills = list(dict.fromkeys(line_skills))
+            if "advanced excel" in line_skills:
+                line_skills = [skill for skill in line_skills if skill != "excel"]
             if not line_skills:
                 continue
-            is_preferred = section == "preferred" or any(marker in lowered for marker in preferred_markers)
-            is_required = section == "required" or any(marker in lowered for marker in required_markers)
-            if is_preferred and not is_required:
+
+            line_is_preferred = _contains_marker(lowered, preferred_markers)
+            line_is_required = _contains_marker(lowered, required_markers)
+            if "preferred but not required" in lowered:
+                line_is_preferred = True
+                line_is_required = False
+
+            if line_is_preferred and not line_is_required:
                 preferred.extend(line_skills)
                 preferred_evidence.append(line)
-            elif is_required:
+            elif line_is_required:
+                required.extend(line_skills)
+                required_evidence.append(line)
+            elif section == "preferred":
+                preferred.extend(line_skills)
+                preferred_evidence.append(line)
+            elif section == "required":
                 required.extend(line_skills)
                 required_evidence.append(line)
 
@@ -226,31 +403,39 @@ class DeterministicJobParser:
         return ""
 
     def _parse_industries(self, text: str, evidence: dict[str, list[str]]) -> list[str]:
-        lowered = text.casefold()
+        context_lines = _industry_context_lines(text)
         found: list[str] = []
+        found_evidence: list[str] = []
         for industry, keywords in self.config.parser.get("industry_keywords", {}).items():
-            if any(keyword.casefold() in lowered for keyword in keywords):
+            matching_lines = [
+                line for line in context_lines if any(_contains_phrase(line, keyword) for keyword in keywords)
+            ]
+            if matching_lines:
                 found.append(normalize_text_key(industry))
+                found_evidence.extend(matching_lines)
         if found:
-            evidence["industries"] = found.copy()
+            evidence["industries"] = list(dict.fromkeys(found_evidence))
         return found
 
     def _parse_job_family(self, title: str, text: str, evidence: dict[str, list[str]]) -> str:
         title_key = normalize_text_key(title)
-        body_key = normalize_text_key(text)
+        role_context = "\n".join(_role_context_lines(text))
         best_family = ""
         best_score = 0
         best_hits: list[str] = []
         for family, keywords in self.config.parser.get("job_family_keywords", {}).items():
-            hits = [keyword for keyword in keywords if normalize_text_key(keyword) in body_key]
-            title_hits = [keyword for keyword in keywords if normalize_text_key(keyword) in title_key]
-            score = len(hits) + 3 * len(title_hits)
+            title_hits = [keyword for keyword in keywords if _contains_phrase(title_key, keyword)]
+            role_hits = [keyword for keyword in keywords if _contains_phrase(role_context, keyword)]
+            score = 8 * len(title_hits) + 3 * len(role_hits)
             if score > best_score:
                 best_family = normalize_text_key(family)
                 best_score = score
-                best_hits = list(dict.fromkeys(title_hits + hits))
+                best_hits = [
+                    *[f"title: {item}" for item in title_hits],
+                    *[f"role context: {item}" for item in role_hits],
+                ]
         if best_family:
-            evidence["job_family"] = best_hits
+            evidence["job_family"] = list(dict.fromkeys(best_hits))
         return best_family
 
     def _parse_licenses(self, text: str, evidence: dict[str, list[str]]) -> list[str]:

@@ -98,6 +98,33 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(any("candidate years of experience" in item.casefold() for item in result.unknown_requirements))
         self.assertFalse(any("experience" in item.casefold() for item in result.hard_blockers))
 
+    def test_jersey_city_hybrid_matches_nyc_metro_candidate_policy(self) -> None:
+        self.profile.preferred_locations = [
+            "New York City",
+            "Long Island",
+            "Jersey City",
+            "Northern New Jersey",
+            "NYC metropolitan area",
+        ]
+        self.profile.remote_preferences = ["remote"]
+        parser = DeterministicJobParser(self.config)
+        job = parser.parse(
+            RawJob(
+                title="Forecasting Analyst",
+                company="Example Co",
+                location="Jersey City, NJ, USA",
+                source="manual",
+                discovered_date="2026-08-10",
+                job_description="Employees work in a hybrid mode.\nFull-time.",
+            )
+        )
+
+        result = self.scorer.score(self.profile, job)
+
+        location = next(item for item in result.components if item.component == "location")
+        self.assertEqual(location.awarded_points, location.maximum_points)
+        self.assertIn("matches", location.reason.casefold())
+
     def test_thresholds_are_loaded_from_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "override.json"

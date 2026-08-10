@@ -65,6 +65,111 @@ class JobParserTests(unittest.TestCase):
         self.assertEqual(job.remote_policy, "")
         self.assertTrue(job.discovered_date)
 
+    def parse_description(self, description: str, *, title: str = "Analyst"):
+        return self.parser.parse(
+            RawJob(
+                title=title,
+                company="Example Co",
+                location="New York, NY",
+                source="manual",
+                discovered_date="2026-08-10",
+                job_description=description,
+            )
+        )
+
+    def test_master_data_terms_do_not_create_masters_degree(self) -> None:
+        job = self.parse_description(
+            """Qualifications
+- Bachelor's degree in a quantitative field.
+- Maintain master data, Masterdata, and master-data records.
+"""
+        )
+
+        self.assertEqual(job.education_required, ["bachelor"])
+
+        degree_job = self.parse_description(
+            "Qualifications\n- A Master of Science or M.S. degree is required."
+        )
+        self.assertEqual(degree_job.education_required, ["master"])
+
+    def test_plus_classifies_bi_tools_as_preferred_not_required(self) -> None:
+        job = self.parse_description(
+            """Qualifications
+- Power BI, Tableau, or QlikView is a plus.
+"""
+        )
+
+        for skill in ("powerbi", "tableau", "qlikview"):
+            self.assertIn(skill, job.preferred_skills)
+            self.assertNotIn(skill, job.skills_required)
+
+    def test_preferred_marker_overrides_required_section_context(self) -> None:
+        job = self.parse_description(
+            """Requirements
+- SQL is required.
+- Tableau preferred.
+"""
+        )
+
+        self.assertIn("sql", job.skills_required)
+        self.assertIn("tableau", job.preferred_skills)
+        self.assertNotIn("tableau", job.skills_required)
+
+    def test_advanced_excel_required_preserves_advanced_requirement(self) -> None:
+        job = self.parse_description(
+            """Qualifications
+- Advanced Excel skills required, including pivot tables and complex formulas.
+"""
+        )
+
+        self.assertIn("advanced excel", job.skills_required)
+        self.assertNotIn("excel", job.skills_required)
+
+    def test_forecasting_domain_requirements_are_retained(self) -> None:
+        job = self.parse_description(
+            """Job Responsibilities
+- Develop forecasting reports and maintain demand planning master data across the supply chain.
+""",
+            title="Forecasting Analyst",
+        )
+
+        for requirement in ("forecasting", "demand planning", "master data", "supply chain"):
+            self.assertIn(requirement, job.skills_required)
+
+    def test_analytical_forecasting_role_is_not_classified_as_marketing(self) -> None:
+        job = self.parse_description(
+            """Company Description
+We are a consumer brand supported by marketing and sales teams.
+
+Main Job Objective
+Provide forecasting reports and data analysis for demand planning decisions.
+
+Job Responsibilities
+- Build business intelligence reporting and forecasting dashboards.
+- Share demand planning results with Supply Chain, Marketing, and Sales.
+""",
+            title="Analyst, Global Forecasting",
+        )
+
+        self.assertEqual(job.job_family, "data analytics")
+
+    def test_incidental_qualification_and_benefit_terms_do_not_create_industries(self) -> None:
+        job = self.parse_description(
+            """Company Description
+We are a global consumer products organization.
+
+Qualifications
+- Bachelor's degree in Finance, Statistics, or Supply Chain Management.
+- Experience with forecasting software and retailer-level reporting.
+
+Benefits
+- Medical coverage and technology discounts.
+""",
+            title="Forecasting Analyst",
+        )
+
+        self.assertEqual(job.industries, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,19 @@
+GIS Data Analyst
+Boston, MA (Hybrid)
+Full-time
+
+About the role
+Join a geospatial technology team building data products for public-sector clients.
+
+Requirements
+- Bachelor's degree in computer science, geography, or a related field.
+- 2+ years of professional data analysis experience.
+- Strong Python, SQL, GIS, ArcGIS, and data visualization skills.
+- Must be authorized to work in the United States without sponsorship.
+- GISP certification required.
+
+Preferred Skills
+- ArcGIS Pro and Tableau.
+
+Salary: $90,000 - $110,000 per year.
+

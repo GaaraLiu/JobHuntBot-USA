@@ -38,6 +38,7 @@ Use the templates in `templates/` to create user-owned files:
 - `candidate_profile.template.json`
 - `application_rules.template.md`
 - `resume_routing.template.md`
+- `resume_routing.template.json` (machine-readable rules used by the Phase 1 executable core)
 - `answer_bank.template.md`
 - `experience_bank.template.md`
 - `dashboard-template/*.csv`
@@ -114,7 +115,7 @@ For a first trial or demo run, default to lead finding only: find, screen, class
 
 For a real submission, update the same dashboard files (`job_pool` status, `application_log` with the resume version/evidence/answers used, `follow_up` if a next step is already known, `daily_dashboard` summary) *and* the candidate's own profile: if filling the form surfaced a fact that isn't already in `candidate_profile.json` (a new internship detail, an updated exam/grade result, a preference the user stated on the spot, anything), write it back into the profile before moving on — don't let it live only in the one application you just filed. Same discipline as everywhere else in this skill: record what you've confirmed, don't invent what you haven't.
 
-When recording a submission in `application_log`, also capture the full job description text (responsibilities and requirements) from the official posting into the `job_description` field, copied verbatim from the source — not summarized or paraphrased. This is what makes later interview prep possible without having to re-find a posting that may since have been taken down.
+Store the full job description text (responsibilities and requirements) once in the matching `job_pool` row's `job_description` field, copied verbatim from the official source — not summarized or paraphrased. Link application attempts in `application_log` back to that row through `job_id`; do not duplicate the full description in every application-log row. This preserves later interview-prep evidence without creating divergent copies.
 
 ### 10. Learn From Blockers
 

@@ -18,15 +18,73 @@ templates/
   candidate_profile.template.json    Your facts: identity, contact, work authorization, targets
   application_rules.template.md      What to prioritize, consider, skip, or hand off to you
   resume_routing.template.md        Which resume/version to use for which role family
+  resume_routing.template.json      Machine-readable executable resume-routing rules
   answer_bank.template.md           Reusable truthful answers for common application questions
   experience_bank.template.md       Which internships/projects to feature per role family and JD
   dashboard-template/               Empty CSV dashboard + field reference (see its README.md)
+src/jobhuntbot/                  Phase 1 local matching, scoring, routing, storage, and CLI
+schemas/dashboard.schema.json    Versioned canonical CSV contract
+tests/                           Offline deterministic automated tests
 dashboard/                       A ready-to-run local dashboard (same CSV schema as the template)
   server.js                     Zero-dependency static file server (Node.js, no npm install)
   dashboard.html                 The dashboard UI itself
   start-dashboard.bat / .sh     One-click launcher (Windows / macOS-Linux)
   *.csv                          Empty starter data files
 ```
+
+## Phase 1 Executable Core
+
+### Implemented now
+
+Phase 1 can run entirely offline. Given a structured candidate profile and raw job-description text, it:
+
+- validates critical candidate facts without inventing missing information;
+- deterministically parses and normalizes job requirements;
+- creates a stable `job_id`;
+- produces a 0–100 evidence-backed score with component reasons and evidence;
+- keeps matched, missing, unknown, and hard-blocking requirements separate;
+- recommends `APPLY`, `REVIEW`, or `SKIP` using configurable thresholds;
+- selects a resume from structured JSON routing rules and explains why;
+- optionally inserts or updates the result in `dashboard/job_pool.csv`.
+
+Install the local package from the repository root:
+
+```bash
+python -m pip install -e .
+```
+
+Copy and privately fill `templates/candidate_profile.template.json` and `templates/resume_routing.template.json`, then validate the profile:
+
+```bash
+python -m jobhuntbot validate-profile --profile my-materials/candidate_profile.json
+```
+
+Analyze one saved raw job description:
+
+```bash
+python -m jobhuntbot analyze-job \
+  --profile my-materials/candidate_profile.json \
+  --resume-routing my-materials/resume_routing.json \
+  --description-file my-materials/job-description.txt \
+  --title "Data Analyst" \
+  --company "Example Company" \
+  --location "Boston, MA" \
+  --json
+```
+
+Add `--save --job-pool dashboard/job_pool.csv` to persist the analysis. Saving an `APPLY` recommendation creates a `Pending` lifecycle row; it does not submit an application.
+
+Run the offline test suite with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+See `docs/phase1-architecture.md` and `docs/data-schema.md` for design and schema details.
+
+### Planned for later phases — not implemented
+
+Phase 1 does **not** include LinkedIn or Indeed scraping, job-site adapters, browser automation, Playwright/Selenium, authentication, CAPTCHA handling, ATS submission, automatic application submission, automatic resume rewriting, LLM APIs, or a database. The written agent workflow may be used with separately authorized external tools, but those capabilities are not provided by this executable core.
 
 ## Quick Start
 
@@ -131,6 +189,20 @@ dashboard/                       开箱即用的本地进度看板(CSV结构与�
   start-dashboard.bat / .sh     一键启动脚本(Windows / macOS-Linux)
   *.csv                          空白起始数据文件
 ```
+
+### Phase 1 可执行核心
+
+当前版本已经提供可离线运行的 Python 核心：验证候选人资料、解析并标准化原始 JD、生成稳定 `job_id`、输出带证据的分项匹配分数、区分匹配/缺失/未知条件和硬性阻塞、给出 `APPLY` / `REVIEW` / `SKIP`，并从结构化 JSON 规则中推荐简历。分析结果可以选择写入 `dashboard/job_pool.csv`，但这只表示记录或排队，不会提交申请。
+
+```bash
+python -m pip install -e .
+python -m jobhuntbot validate-profile --profile my-materials/candidate_profile.json
+python -m unittest discover -s tests -v
+```
+
+具体分析命令及参数见上方英文版“Phase 1 Executable Core”。
+
+尚未实现：LinkedIn/Indeed 抓取、浏览器自动化、Playwright/Selenium、登录或 CAPTCHA 处理、ATS 提交、自动投递、自动改写简历、LLM API 和数据库。这些属于后续阶段。
 
 ### 快速开始
 

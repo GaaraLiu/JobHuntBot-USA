@@ -403,31 +403,32 @@
   function escMultiline(s) {
     return esc(s).replace(/\n/g, '<br>');
   }
-  function jdFor(company) {
-    const logs = logsFor(company);
-    if (!logs.length) return '';
-    const l = logs[logs.length-1];
-    return (l.job_description || '').trim();
+  function sameJob(record, job) {
+    if (record.job_id && job.job_id) return record.job_id === job.job_id;
+    return record.company === job.company && (!record.job_title || record.job_title === job.job_title);
   }
-  function followUpsFor(company) {
+  function jdFor(job) {
+    return (job.job_description || '').trim();
+  }
+  function followUpsFor(job) {
     return data.followUp
-      .filter(f => f.company === company)
+      .filter(f => sameJob(f, job))
       .sort((a,b) => (a.date||'').localeCompare(b.date||''));
   }
-  function logsFor(company) {
-    return data.appLog.filter(a => a.company === company);
+  function logsFor(job) {
+    return data.appLog.filter(a => sameJob(a, job));
   }
   // 投递日期的真实来源是 application_log.csv 的 attempt_date（实际点击提交那天），
   // 不是 job_pool.csv 的 date_found（发现/加入职位池那天）——两者常常不是同一天
-  // （比如先加入池子，几天后卡点/等用户处理完才真正点提交）。取该公司最新一条
+  // （比如先加入池子，几天后卡点/等用户处理完才真正点提交）。取该职位最新一条
   // 投递记录的 attempt_date；只有在完全没有日志时才退回 date_found 兜底。
   function submittedDateFor(r) {
-    const logs = logsFor(r.company);
+    const logs = logsFor(r);
     if (logs.length) return logs[logs.length - 1].attempt_date || r.date_found;
     return r.date_found;
   }
-  function submissionMode(company) {
-    const logs = logsFor(company);
+  function submissionMode(job) {
+    const logs = logsFor(job);
     if (!logs.length) return { label: '记录方式未知', cls: '' };
     const l = logs[logs.length-1];
     const blob = (l.submission_evidence||'') + (l.notes||'');
@@ -440,7 +441,7 @@
     // since it's a direct user action rather than a guess. Fall back to the
     // older follow_up-derived text for rows that predate that column.
     if (r.current_stage && r.current_stage.trim()) return r.current_stage;
-    const fu = followUpsFor(r.company);
+    const fu = followUpsFor(r);
     if (!fu.length) return '已投递，等待中';
     const last = fu[fu.length-1];
     return (last.event_type ? last.event_type + '：' : '') + (last.next_action || last.status || '进行中');
@@ -449,8 +450,8 @@
   // ---------- home tiles ----------
   function renderHome() {
     const applied = data.jobPool.filter(r => r.status === 'Submitted');
-    const ended = data.jobPool.filter(r => r.status === 'Offer' || r.status === 'Rejected');
-    const pending = data.jobPool.filter(r => r.status === 'Pending' || r.status === 'Needs user');
+    const ended = data.jobPool.filter(r => r.status === 'Offer' || r.status === 'Rejected' || r.status === 'Skipped');
+    const pending = data.jobPool.filter(r => r.status === 'Pending' || r.status === 'Needs user' || r.status === 'Blocked');
     document.getElementById('tile-applied').textContent = applied.length;
     document.getElementById('tile-pending').textContent = pending.length;
     document.getElementById('tile-ended').textContent = ended.length;
@@ -514,11 +515,11 @@
 
       filtered.forEach(r => {
         const cat = category(r);
-        const mode = submissionMode(r.company);
+        const mode = submissionMode(r);
         const stage = currentStage(r);
-        const fu = followUpsFor(r.company);
+        const fu = followUpsFor(r);
         const timeline = fu.map(f => `<div class="timeline-item">${esc(f.date)} — ${esc(f.event_type)}：${esc(f.status)} ${esc(f.next_action)}</div>`).join('') || '<div class="timeline-item">暂无跟进记录</div>';
-        const jd = jdFor(r.company);
+        const jd = jdFor(r);
 
         const html = `
           <div class="card-top">
@@ -534,7 +535,7 @@
           </div>
           <div class="detail">
             <dt>职位/城市</dt><dd>${esc(r.job_title)} · ${esc(r.location)}</dd>
-            <dt>岗位描述（JD）</dt><dd>${jd ? escMultiline(jd) : '暂未记录，可在 application_log.csv 的 job_description 列补充'}</dd>
+            <dt>岗位描述（JD）</dt><dd>${jd ? escMultiline(jd) : '暂未记录，可在 job_pool.csv 的 job_description 列补充'}</dd>
             <dt>备注</dt><dd>${esc(r.notes)}</dd>
             <dt>next_action</dt><dd>${esc(r.next_action)}</dd>
             ${r.job_url ? `<dt>链接</dt><dd><a href="${esc(r.job_url)}" target="_blank" rel="noopener">${esc(r.job_url)}</a></dd>` : ''}
@@ -577,7 +578,7 @@
     const citySel = document.getElementById('pending-filter-city');
     const search = document.getElementById('pending-search');
 
-    let rows = data.jobPool.filter(r => r.status === 'Pending' || r.status === 'Needs user');
+    let rows = data.jobPool.filter(r => r.status === 'Pending' || r.status === 'Needs user' || r.status === 'Blocked');
 
     if (catSel.options.length <= 1) {
       [...new Set(rows.map(category))].sort().forEach(c => { const o=document.createElement('option'); o.value=c; o.textContent=c; catSel.appendChild(o); });
@@ -601,6 +602,7 @@
             <div class="tags">
               <span class="chip ${catChipClass(cat)}">${esc(cat)}</span>
               <span class="chip">优先级 ${esc(r.priority)}</span>
+              ${r.recommendation ? `<span class="chip">${esc(r.recommendation)} · ${esc(r.fit_score || '?')}/100</span>` : ''}
               ${unclearChip}
             </div>
           </div>
@@ -609,6 +611,8 @@
         <div class="detail">
           <dt>next_action</dt><dd>${esc(r.next_action)}</dd>
           <dt>备注</dt><dd>${esc(r.notes)}</dd>
+          ${r.recommended_resume ? `<dt>推荐简历</dt><dd>${esc(r.recommended_resume)}</dd>` : ''}
+          ${r.hard_blockers && r.hard_blockers !== '[]' ? `<dt>硬性阻塞</dt><dd>${esc(r.hard_blockers)}</dd>` : ''}
           ${r.job_url ? `<dt>链接</dt><dd><a href="${esc(r.job_url)}" target="_blank" rel="noopener">${esc(r.job_url)}</a></dd>` : ''}
         </div>`;
       return cardEl(html);
@@ -644,7 +648,7 @@
   function renderEnded() {
     const listEl = document.getElementById('ended-list');
     const search = document.getElementById('ended-search');
-    let rows = data.jobPool.filter(r => r.status === 'Offer' || r.status === 'Rejected');
+    let rows = data.jobPool.filter(r => r.status === 'Offer' || r.status === 'Rejected' || r.status === 'Skipped');
 
     function draw() {
       let filtered = rows.slice();
@@ -660,8 +664,10 @@
         const cat = category(r);
         const resultChip = r.status === 'Offer'
           ? '<span class="chip chip-good">🟢 Offer</span>'
-          : '<span class="chip chip-critical">已挂</span>';
-        const jd = jdFor(r.company);
+          : r.status === 'Skipped'
+            ? '<span class="chip chip-warning">Skipped</span>'
+            : '<span class="chip chip-critical">已挂</span>';
+        const jd = jdFor(r);
         const html = `
           <div class="card-top">
             <div>
@@ -768,7 +774,7 @@
       document.getElementById('cal-date').value = existingEvent.date;
       document.getElementById('cal-time').value = existingEvent.time;
       document.getElementById('cal-event-type').value = existingEvent.event_type;
-      const jobRow = data.jobPool.find(r => r.company === existingEvent.company && r.job_title === existingEvent.job_title && r.status === 'Submitted');
+      const jobRow = data.jobPool.find(r => sameJob(existingEvent, r) && r.status === 'Submitted');
       if (jobRow) {
         selectCalendarJob(jobRow);
       } else {
@@ -818,8 +824,8 @@
     try {
       const isEdit = calEditingRowIndex !== null;
       const body = isEdit
-        ? { followUpRowIndex: calEditingRowIndex, jobRowIndex: calSelectedJob.__rowIndex, company: calSelectedJob.company, job_title: calSelectedJob.job_title, date, time, event_type }
-        : { jobRowIndex: calSelectedJob.__rowIndex, company: calSelectedJob.company, job_title: calSelectedJob.job_title, date, time, event_type };
+        ? { followUpRowIndex: calEditingRowIndex, jobRowIndex: calSelectedJob.__rowIndex, company: calSelectedJob.company, job_title: calSelectedJob.job_title, job_id: calSelectedJob.job_id || '', date, time, event_type }
+        : { jobRowIndex: calSelectedJob.__rowIndex, company: calSelectedJob.company, job_title: calSelectedJob.job_title, job_id: calSelectedJob.job_id || '', date, time, event_type };
       const res = await fetch(isEdit ? '/api/calendar/update' : '/api/calendar/add', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -838,7 +844,7 @@
     try {
       const res = await fetch('/api/calendar/delete', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ followUpRowIndex: ev.__rowIndex, company: ev.company, job_title: ev.job_title, event_type: ev.event_type, date: ev.date, time: ev.time }),
+        body: JSON.stringify({ followUpRowIndex: ev.__rowIndex, company: ev.company, job_title: ev.job_title, job_id: ev.job_id || '', event_type: ev.event_type, date: ev.date, time: ev.time }),
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok || !result.ok) throw new Error(result.error || ('HTTP ' + res.status));

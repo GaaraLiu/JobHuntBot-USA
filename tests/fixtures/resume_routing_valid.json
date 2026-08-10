@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "default_resume_id": "general-data",
+  "resumes": [
+    {
+      "resume_id": "gis-data",
+      "file_path": "resumes/gis-data.pdf",
+      "target_job_families": ["geospatial", "data analytics"],
+      "keywords": ["GIS", "geospatial", "ArcGIS"],
+      "skills": ["Python", "SQL", "GIS", "ArcGIS", "Tableau"],
+      "industries": ["geospatial", "technology"],
+      "priority": 100,
+      "active": true
+    },
+    {
+      "resume_id": "general-data",
+      "file_path": "resumes/general-data.pdf",
+      "target_job_families": ["data analytics"],
+      "keywords": ["data analyst", "analytics", "business intelligence"],
+      "skills": ["Python", "SQL", "Tableau"],
+      "industries": ["technology", "finance"],
+      "priority": 50,
+      "active": true
+    }
+  ]
+}

@@ -141,9 +141,9 @@ async function handleUpdateStatus(req, res) {
 
 // Locate + verify a job_pool.csv row by index, checking it still matches the
 // company/job_title the client last saw (same staleness guard as above).
-// Returns { header, dataRows, companyCol, titleCol, stageCol, target } or
+// Returns the CSV rows, status/stage/job-ID indexes, and selected target row, or
 // throws an Error with an httpStatus property for the caller to relay.
-function locateJobRow(jobRowIndex, company, job_title) {
+function locateJobRow(jobRowIndex, company, job_title, job_id) {
   if (!Number.isInteger(jobRowIndex) || jobRowIndex < 0) {
     const e = new Error('jobRowIndex must be a non-negative integer'); e.httpStatus = 400; throw e;
   }
@@ -157,6 +157,7 @@ function locateJobRow(jobRowIndex, company, job_title) {
   const titleCol = header.indexOf('job_title');
   const statusCol = header.indexOf('status');
   const stageCol = header.indexOf('current_stage');
+  const jobIdCol = header.indexOf('job_id');
   if ([companyCol, titleCol, statusCol, stageCol].includes(-1)) {
     const e = new Error('job_pool.csv is missing an expected column (company/job_title/status/current_stage)'); e.httpStatus = 500; throw e;
   }
@@ -167,10 +168,13 @@ function locateJobRow(jobRowIndex, company, job_title) {
   if (target[companyCol] !== company || target[titleCol] !== job_title) {
     const e = new Error('This job row no longer matches — the dashboard data changed, please refresh and try again'); e.httpStatus = 409; throw e;
   }
+  if (job_id && jobIdCol !== -1 && target[jobIdCol] && target[jobIdCol] !== job_id) {
+    const e = new Error('This job ID no longer matches — the dashboard data changed, please refresh and try again'); e.httpStatus = 409; throw e;
+  }
   if (target[statusCol] !== 'Submitted') {
     const e = new Error('This job is not in the Submitted/Applied bucket — calendar events are only for already-applied jobs'); e.httpStatus = 409; throw e;
   }
-  return { header, dataRows, statusCol, stageCol, target };
+  return { header, dataRows, statusCol, stageCol, jobIdCol, target };
 }
 
 async function handleCalendarAdd(req, res) {
@@ -181,7 +185,7 @@ async function handleCalendarAdd(req, res) {
     return sendJSON(res, 400, { ok: false, error: e.message });
   }
 
-  const { jobRowIndex, company, job_title, date, time, event_type } = payload || {};
+  const { jobRowIndex, company, job_title, job_id, date, time, event_type } = payload || {};
   if (!DATE_RE.test(date)) return sendJSON(res, 400, { ok: false, error: 'date must be YYYY-MM-DD' });
   if (!TIME_RE.test(time)) return sendJSON(res, 400, { ok: false, error: 'time must be HH:MM' });
   if (typeof event_type !== 'string' || !event_type.trim()) {
@@ -190,7 +194,7 @@ async function handleCalendarAdd(req, res) {
 
   let jobRow;
   try {
-    jobRow = locateJobRow(jobRowIndex, company, job_title);
+    jobRow = locateJobRow(jobRowIndex, company, job_title, job_id);
   } catch (e) {
     return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message });
   }
@@ -218,6 +222,9 @@ async function handleCalendarAdd(req, res) {
   newRow[fuHeader.indexOf('event_type')] = event_type.trim();
   newRow[fuHeader.indexOf('status')] = 'Scheduled';
   newRow[fuHeader.indexOf('time')] = time;
+  if (fuHeader.indexOf('job_id') !== -1 && jobRow.jobIdCol !== -1) {
+    newRow[fuHeader.indexOf('job_id')] = jobRow.target[jobRow.jobIdCol] || job_id || '';
+  }
   fuDataRows.push(newRow);
   const followUpRowIndex = fuDataRows.length - 1;
 
@@ -239,7 +246,7 @@ async function handleCalendarUpdate(req, res) {
     return sendJSON(res, 400, { ok: false, error: e.message });
   }
 
-  const { followUpRowIndex, jobRowIndex, company, job_title, date, time, event_type } = payload || {};
+  const { followUpRowIndex, jobRowIndex, company, job_title, job_id, date, time, event_type } = payload || {};
   if (!Number.isInteger(followUpRowIndex) || followUpRowIndex < 0) {
     return sendJSON(res, 400, { ok: false, error: 'followUpRowIndex must be a non-negative integer' });
   }
@@ -267,7 +274,7 @@ async function handleCalendarUpdate(req, res) {
 
   let jobRow;
   try {
-    jobRow = locateJobRow(jobRowIndex, company, job_title);
+    jobRow = locateJobRow(jobRowIndex, company, job_title, job_id);
   } catch (e) {
     return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message });
   }
@@ -275,6 +282,9 @@ async function handleCalendarUpdate(req, res) {
   fuTarget[fuHeader.indexOf('date')] = date;
   fuTarget[fuHeader.indexOf('time')] = time;
   fuTarget[fuHeader.indexOf('event_type')] = event_type.trim();
+  if (fuHeader.indexOf('job_id') !== -1 && jobRow.jobIdCol !== -1) {
+    fuTarget[fuHeader.indexOf('job_id')] = jobRow.target[jobRow.jobIdCol] || job_id || '';
+  }
 
   // Same rule as add: current_stage is the event content verbatim.
   const stage = event_type.trim();
@@ -298,7 +308,7 @@ async function handleCalendarDelete(req, res) {
     return sendJSON(res, 400, { ok: false, error: e.message });
   }
 
-  const { followUpRowIndex, company, job_title, event_type, date, time } = payload || {};
+  const { followUpRowIndex, company, job_title, job_id, event_type, date, time } = payload || {};
   if (!Number.isInteger(followUpRowIndex) || followUpRowIndex < 0) {
     return sendJSON(res, 400, { ok: false, error: 'followUpRowIndex must be a non-negative integer' });
   }
@@ -316,6 +326,9 @@ async function handleCalendarDelete(req, res) {
   const matches = (col, val) => fuTarget[fuHeader.indexOf(col)] === val;
   if (!matches('company', company) || !matches('job_title', job_title) || !matches('event_type', event_type) || !matches('date', date) || !matches('time', time)) {
     return sendJSON(res, 409, { ok: false, error: 'This event no longer matches — the calendar may have changed, please refresh' });
+  }
+  if (job_id && fuHeader.indexOf('job_id') !== -1 && fuTarget[fuHeader.indexOf('job_id')] && !matches('job_id', job_id)) {
+    return sendJSON(res, 409, { ok: false, error: 'This event job ID no longer matches — please refresh' });
   }
 
   fuDataRows.splice(followUpRowIndex, 1);

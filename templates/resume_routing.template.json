@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "default_resume_id": "",
+  "resumes": [
+    {
+      "resume_id": "data-analytics",
+      "file_path": "my-materials/resume-data-analytics.pdf",
+      "target_job_families": ["data analytics"],
+      "keywords": ["data analyst", "business intelligence", "analytics"],
+      "skills": ["Python", "SQL", "Tableau"],
+      "industries": ["technology"],
+      "priority": 100,
+      "active": true
+    }
+  ]
+}
+

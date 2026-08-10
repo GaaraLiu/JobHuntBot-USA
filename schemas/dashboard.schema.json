@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "format": {
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "line_ending": "CRLF",
+    "structured_cell_encoding": "canonical JSON: UTF-8, sorted keys, compact separators"
+  },
+  "compatibility": {
+    "title": "job_title",
+    "discovered_date": "date_found",
+    "legacy_job_url": "job_url",
+    "job_url_rule": "apply_url when present, otherwise source_url",
+    "job_description_owner": "job_pool",
+    "application_log_relation": "job_id"
+  },
+  "tables": {
+    "daily_dashboard": {
+      "description": "Per-run aggregate counts and user actions.",
+      "columns": ["date", "found_count", "submitted_count", "skipped_count", "blocked_count", "needs_user_count", "pending_count", "top_sources", "summary", "user_actions_needed"]
+    },
+    "job_pool": {
+      "description": "Canonical current state, normalized job data, matching result, and resume recommendation.",
+      "primary_key": "job_id",
+      "columns": [
+        "date_found", "company", "job_title", "role_family", "level", "location", "remote_policy", "source", "job_url", "posted_date", "priority", "status", "resume_variant", "skip_reason", "blocker", "next_action", "notes", "cohort_match_status", "current_stage",
+        "job_id", "source_native_id", "source_url", "apply_url", "job_description", "salary_min", "salary_max", "salary_currency", "salary_period", "employment_type", "experience_required_min_years", "experience_required_max_years", "education_required", "skills_required", "preferred_skills", "industry", "fit_score", "score_coverage", "recommendation", "score_breakdown", "matched_requirements", "missing_requirements", "unknown_requirements", "hard_blockers", "recommended_resume", "resume_reasoning", "analyzed_at"
+      ]
+    },
+    "application_log": {
+      "description": "Application-attempt facts only. Full job descriptions live in job_pool and are referenced through job_id.",
+      "foreign_key": "job_id -> job_pool.job_id",
+      "columns": ["attempt_date", "company", "job_title", "job_url", "platform", "status", "submission_evidence", "resume_used", "answers_used", "confirmation_url", "confirmation_text", "notes", "job_id"]
+    },
+    "blocker_queue": {
+      "description": "Application and workflow blockers linked to a job when available.",
+      "foreign_key": "job_id -> job_pool.job_id",
+      "columns": ["date", "company", "job_title", "job_url", "blocker_category", "what_happened", "why_blocked", "can_retry", "next_retry_strategy", "user_action_needed", "status", "job_id"]
+    },
+    "follow_up": {
+      "description": "Post-application events linked to a job when available.",
+      "foreign_key": "job_id -> job_pool.job_id",
+      "columns": ["date", "company", "job_title", "contact", "channel", "event_type", "deadline", "next_action", "status", "notes", "time", "job_id"]
+    },
+    "resume_rules": {
+      "description": "Legacy dashboard table. Executable routing uses structured resume-routing JSON.",
+      "columns": ["role_family", "resume_file_path", "use_for_titles", "avoid_for_titles", "tailor_threshold", "notes"]
+    },
+    "automation_rules": {
+      "description": "Lessons and workflow rules learned from blockers.",
+      "columns": ["date", "rule_category", "rule", "reason", "source_blocker_or_lesson", "status"]
+    }
+  }
+}

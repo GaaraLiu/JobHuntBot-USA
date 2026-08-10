@@ -1,5 +1,7 @@
 # Resume Routing Template
 
+This Markdown file remains a human-readable planning document. Executable Phase 1 routing uses `resume_routing.template.json` (copied to a private user-owned JSON file) and does not parse this Markdown.
+
 ## Strategy
 
 Choose one:

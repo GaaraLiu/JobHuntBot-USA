@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "candidate": {
+    "preferred_name": "Test Candidate",
+    "current_location": "Boston, MA"
+  },
+  "education": [
+    {
+      "institution": "Example University",
+      "degree": "Bachelor of Science",
+      "field_of_study": "Computer Science",
+      "graduation_date": "2022-05",
+      "level": "bachelor"
+    }
+  ],
+  "skills": ["Python", "SQL", "GIS", "Data Analysis", "ArcGIS"],
+  "years_of_experience": 3,
+  "work_experience": [
+    {
+      "company": "Example Co",
+      "title": "Data Analyst",
+      "start_date": "2022-06",
+      "end_date": "2025-06",
+      "years": 3,
+      "skills": ["Python", "SQL", "Tableau"],
+      "industries": ["technology"],
+      "description": "Built reporting and geospatial analysis workflows."
+    }
+  ],
+  "projects": [
+    {
+      "name": "Transit Access Map",
+      "description": "Analyzed transit coverage with GIS.",
+      "skills": ["GIS", "Python"],
+      "industries": ["geospatial"]
+    }
+  ],
+  "preferences": {
+    "preferred_roles": ["Data Analyst", "GIS Analyst"],
+    "secondary_roles": ["Business Intelligence Analyst"],
+    "preferred_locations": ["Boston, MA", "Remote"],
+    "remote_preferences": ["remote", "hybrid"],
+    "industries": ["technology", "geospatial"]
+  },
+  "compensation": {
+    "minimum_salary": 80000,
+    "currency": "USD",
+    "period": "year"
+  },
+  "work_authorization": {
+    "country": "United States",
+    "current_authorization": "Authorized to work in the United States",
+    "authorized_countries": ["United States"],
+    "requires_sponsorship_now": false,
+    "requires_sponsorship_in_future": false,
+    "citizenships": [],
+    "citizenships_complete": false,
+    "security_clearances": [],
+    "security_clearances_complete": true,
+    "licenses_certifications": ["GISP"],
+    "licenses_certifications_complete": true
+  },
+  "constraints": {
+    "required": {
+      "employment_types": ["full-time"]
+    },
+    "excluded_roles": ["Senior Director"],
+    "excluded_locations": ["Antarctica"],
+    "excluded_conditions": ["unpaid"]
+  },
+  "resume_routing_file": "resume_routing_valid.json"
+}

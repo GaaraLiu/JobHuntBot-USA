@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "candidate": {},
+  "skills": [],
+  "years_of_experience": null,
+  "preferences": {
+    "preferred_roles": [],
+    "preferred_locations": []
+  },
+  "compensation": {
+    "minimum_salary": null
+  },
+  "work_authorization": {
+    "country": "",
+    "current_authorization": "",
+    "requires_sponsorship_now": "unknown"
+  },
+  "resume_routing_file": ""
+}
+

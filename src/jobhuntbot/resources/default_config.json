@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "thresholds": {
+    "apply_min": 75,
+    "review_min": 50,
+    "minimum_apply_coverage": 0.7
+  },
+  "scoring_weights": {
+    "role_title": 20,
+    "skills": 25,
+    "education": 10,
+    "experience": 15,
+    "industry": 10,
+    "location": 10,
+    "salary": 10
+  },
+  "normalization": {
+    "skill_aliases": {
+      "js": "javascript",
+      "ts": "typescript",
+      "nodejs": "node.js",
+      "node js": "node.js",
+      "postgres": "postgresql",
+      "power bi": "powerbi",
+      "ms excel": "excel",
+      "amazon web services": "aws",
+      "google cloud platform": "gcp",
+      "machine learning": "machine learning",
+      "artificial intelligence": "artificial intelligence",
+      "natural language processing": "nlp",
+      "geographic information systems": "gis"
+    },
+    "known_skills": [
+      "python", "java", "javascript", "typescript", "sql", "r", "c++", "c#",
+      "node.js", "react", "angular", "vue", "django", "flask", "fastapi",
+      "aws", "azure", "gcp", "docker", "kubernetes", "git", "linux",
+      "postgresql", "mysql", "mongodb", "redis", "spark", "hadoop",
+      "pandas", "numpy", "scikit-learn", "tensorflow", "pytorch",
+      "machine learning", "artificial intelligence", "nlp", "data analysis",
+      "data visualization", "tableau", "powerbi", "excel", "statistics",
+      "gis", "arcgis", "arcgis pro", "qgis", "salesforce", "jira",
+      "product management", "project management", "agile", "scrum",
+      "supply chain", "operations", "marketing", "seo", "financial modeling"
+    ]
+  },
+  "parser": {
+    "required_markers": ["required", "requirements", "must have", "minimum qualifications", "basic qualifications"],
+    "preferred_markers": ["preferred", "nice to have", "bonus", "desired qualifications"],
+    "employment_types": ["full-time", "part-time", "contract", "temporary", "internship"],
+    "education_terms": ["high school", "associate", "bachelor", "master", "mba", "phd", "doctorate"],
+    "industry_keywords": {
+      "technology": ["software", "saas", "technology", "cloud"],
+      "finance": ["finance", "banking", "fintech", "investment"],
+      "healthcare": ["healthcare", "health care", "medical", "clinical"],
+      "retail": ["retail", "e-commerce", "ecommerce"],
+      "manufacturing": ["manufacturing", "factory", "industrial"],
+      "logistics": ["logistics", "supply chain", "transportation"],
+      "geospatial": ["geospatial", "gis", "mapping"]
+    },
+    "job_family_keywords": {
+      "software engineering": ["software engineer", "software developer", "backend", "frontend", "full stack", "devops"],
+      "data analytics": ["data analyst", "business intelligence", "analytics", "data scientist"],
+      "product management": ["product manager", "product owner", "product management"],
+      "operations": ["operations", "supply chain", "logistics", "procurement"],
+      "marketing": ["marketing", "growth", "seo", "brand"],
+      "sales": ["sales", "business development", "account executive"],
+      "geospatial": ["gis", "geospatial", "mapping", "spatial analyst"]
+    }
+  }
+}
+

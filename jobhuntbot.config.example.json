@@ -1,0 +1,8 @@
+{
+  "thresholds": {
+    "apply_min": 75,
+    "review_min": 50,
+    "minimum_apply_coverage": 0.7
+  }
+}
+

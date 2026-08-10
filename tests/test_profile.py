@@ -33,12 +33,74 @@ class CandidateProfileTests(unittest.TestCase):
         self.assertFalse(result.valid)
         self.assertIn("missing_preferred_roles", codes)
         self.assertIn("missing_skills", codes)
-        self.assertIn("missing_years_of_experience", codes)
         self.assertIn("missing_authorization_country", codes)
         self.assertIn("missing_current_authorization", codes)
         self.assertIn("missing_resume_routing_file", codes)
         self.assertIn("invalid_boolean", codes)
+        self.assertIn("unknown_years_of_experience", {issue.code for issue in result.warnings})
         self.assertIsNone(profile.work_authorization.requires_sponsorship_now)
+
+    def test_numeric_years_of_experience_is_valid(self) -> None:
+        profile = load_candidate_profile(FIXTURES / "profile_valid.json")
+
+        result = validate_candidate_profile(profile)
+
+        self.assertTrue(result.valid)
+        self.assertEqual(profile.years_of_experience, 3)
+        self.assertNotIn("unknown_years_of_experience", {issue.code for issue in result.issues})
+
+    def test_null_years_of_experience_is_valid_and_unknown(self) -> None:
+        with (FIXTURES / "profile_valid.json").open(encoding="utf-8") as handle:
+            value = json.load(handle)
+        value["years_of_experience"] = None
+
+        profile = parse_candidate_profile(value)
+        result = validate_candidate_profile(profile)
+
+        self.assertTrue(result.valid, [issue.message for issue in result.errors])
+        self.assertIsNone(profile.years_of_experience)
+        self.assertIn("unknown_years_of_experience", {issue.code for issue in result.warnings})
+
+    def test_negative_years_of_experience_is_invalid(self) -> None:
+        with (FIXTURES / "profile_valid.json").open(encoding="utf-8") as handle:
+            value = json.load(handle)
+        value["years_of_experience"] = -1
+
+        result = validate_candidate_profile(parse_candidate_profile(value))
+
+        self.assertFalse(result.valid)
+        self.assertIn("invalid_years_of_experience", {issue.code for issue in result.errors})
+
+    def test_malformed_years_of_experience_is_invalid(self) -> None:
+        with (FIXTURES / "profile_valid.json").open(encoding="utf-8") as handle:
+            value = json.load(handle)
+        value["years_of_experience"] = "several"
+
+        profile = parse_candidate_profile(value)
+        result = validate_candidate_profile(profile)
+
+        self.assertIsNone(profile.years_of_experience)
+        self.assertFalse(result.valid)
+        self.assertIn("malformed_years_of_experience", {issue.code for issue in result.errors})
+
+    def test_optional_domain_experience_preserves_context_without_fte_years(self) -> None:
+        with (FIXTURES / "profile_valid.json").open(encoding="utf-8") as handle:
+            value = json.load(handle)
+        value["domain_experience"] = {
+            "data_analytics": {
+                "first_relevant_year": 2024,
+                "current": False,
+                "context": "Research, projects, and an internship",
+                "evidence_summary": "Dated evidence is stored separately; no FTE total is inferred."
+            }
+        }
+
+        profile = parse_candidate_profile(value)
+
+        domain = profile.domain_experience["data_analytics"]
+        self.assertEqual(domain.first_relevant_year, 2024)
+        self.assertFalse(domain.current)
+        self.assertIn("no FTE", domain.evidence_summary)
 
     def test_legacy_target_fields_are_supported(self) -> None:
         legacy = {
@@ -77,4 +139,3 @@ class CandidateProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

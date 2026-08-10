@@ -79,6 +79,14 @@ class Project:
 
 
 @dataclass(slots=True)
+class DomainExperience:
+    first_relevant_year: int | None = None
+    current: bool | None = None
+    context: str = ""
+    evidence_summary: str = ""
+
+
+@dataclass(slots=True)
 class WorkAuthorization:
     country: str = ""
     current_authorization: str = ""
@@ -111,6 +119,7 @@ class CandidateProfile:
     salary_period: str = "year"
     work_authorization: WorkAuthorization = field(default_factory=WorkAuthorization)
     years_of_experience: float | None = None
+    domain_experience: dict[str, DomainExperience] = field(default_factory=dict)
     industries: list[str] = field(default_factory=list)
     required_constraints: dict[str, Any] = field(default_factory=dict)
     excluded_roles: list[str] = field(default_factory=list)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping
 
 from .models import (
     CandidateProfile,
+    DomainExperience,
     Education,
     Project,
     ValidationIssue,
@@ -37,9 +39,21 @@ def _optional_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
+    return parsed if isfinite(parsed) else None
+
+
+def _is_malformed_optional_float(value: Any) -> bool:
+    if value is None or value == "":
+        return False
+    if isinstance(value, bool):
+        return True
+    try:
+        return not isfinite(float(value))
+    except (TypeError, ValueError):
+        return True
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -98,6 +112,32 @@ def _parse_projects(items: Any) -> list[Project]:
                 skills=_string_list(value.get("skills")),
                 industries=_string_list(value.get("industries")),
             )
+        )
+    return result
+
+
+def _parse_domain_experience(value: Any) -> dict[str, DomainExperience]:
+    result: dict[str, DomainExperience] = {}
+    if not isinstance(value, Mapping):
+        return result
+    for domain, raw_item in value.items():
+        item = _mapping(raw_item)
+        raw_year = item.get("first_relevant_year")
+        first_relevant_year: int | None = None
+        if not isinstance(raw_year, bool) and raw_year not in (None, ""):
+            try:
+                candidate_year = int(raw_year)
+            except (TypeError, ValueError):
+                pass
+            else:
+                if str(candidate_year) == str(raw_year).strip() or isinstance(raw_year, int):
+                    first_relevant_year = candidate_year
+        raw_current = item.get("current")
+        result[str(domain)] = DomainExperience(
+            first_relevant_year=first_relevant_year,
+            current=raw_current if isinstance(raw_current, bool) else None,
+            context=str(item.get("context", "")).strip(),
+            evidence_summary=str(item.get("evidence_summary", "")).strip(),
         )
     return result
 
@@ -168,6 +208,7 @@ def parse_candidate_profile(value: Mapping[str, Any]) -> CandidateProfile:
             notes=str(authorization.get("notes", authorization.get("notes_for_unclear_forms", ""))).strip(),
         ),
         years_of_experience=years_of_experience,
+        domain_experience=_parse_domain_experience(value.get("domain_experience")),
         industries=industries,
         required_constraints=_mapping(constraints.get("required")),
         excluded_roles=excluded_roles,
@@ -207,8 +248,21 @@ def validate_candidate_profile(profile: CandidateProfile) -> ValidationResult:
         add("error", "preferences.preferred_roles", "missing_preferred_roles", "At least one preferred role is required for title-fit scoring.")
     if not profile.skills:
         add("error", "skills", "missing_skills", "A structured candidate skill list is required for reliable skill-fit scoring.")
-    if profile.years_of_experience is None:
-        add("error", "years_of_experience", "missing_years_of_experience", "Years of experience must be supplied; it will not be inferred.")
+    raw_years_of_experience = profile.raw.get("years_of_experience")
+    if _is_malformed_optional_float(raw_years_of_experience):
+        add(
+            "error",
+            "years_of_experience",
+            "malformed_years_of_experience",
+            "Years of experience must be numeric or null.",
+        )
+    elif profile.years_of_experience is None:
+        add(
+            "warning",
+            "years_of_experience",
+            "unknown_years_of_experience",
+            "Years of experience are unknown; experience scoring will remain UNKNOWN and no value will be inferred.",
+        )
     elif profile.years_of_experience < 0:
         add("error", "years_of_experience", "invalid_years_of_experience", "Years of experience cannot be negative.")
     if not profile.work_authorization.country:

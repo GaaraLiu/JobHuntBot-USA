@@ -86,6 +86,18 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(unknown_components)
         self.assertTrue(all(item.awarded_points is None for item in unknown_components))
 
+    def test_unknown_candidate_experience_is_unscored_and_not_a_blocker(self) -> None:
+        self.profile.years_of_experience = None
+        job = parsed_job("job_review.txt", title="Senior Data Platform Analyst", location="Seattle, WA")
+
+        result = self.scorer.score(self.profile, job)
+
+        experience = next(item for item in result.components if item.component == "experience")
+        self.assertEqual(experience.status, "unknown")
+        self.assertIsNone(experience.awarded_points)
+        self.assertTrue(any("candidate years of experience" in item.casefold() for item in result.unknown_requirements))
+        self.assertFalse(any("experience" in item.casefold() for item in result.hard_blockers))
+
     def test_thresholds_are_loaded_from_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "override.json"

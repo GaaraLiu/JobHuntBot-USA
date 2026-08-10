@@ -125,6 +125,58 @@ class JobParserTests(unittest.TestCase):
         self.assertIn("advanced excel", job.skills_required)
         self.assertNotIn("excel", job.skills_required)
 
+    def test_advanced_excel_context_variants_preserve_proficiency(self) -> None:
+        phrases = [
+            "Advanced Excel skills required",
+            "Microsoft Excel (advanced skills required)",
+            "Excel (advanced)",
+            "Advanced proficiency in Excel is required",
+            "Advanced proficiency in Microsoft Excel is required",
+            "Advanced Microsoft Excel proficiency required",
+            "Excel - advanced proficiency required",
+        ]
+
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                job = self.parse_description(f"Qualifications\n- {phrase}.")
+                self.assertIn("advanced excel", job.skills_required)
+                self.assertNotIn("excel", job.skills_required)
+
+    def test_collaboration_counterparties_are_not_required_skills(self) -> None:
+        job = self.parse_description(
+            """Job Responsibilities
+- Work with Supply Chain, Marketing, and Sales teams.
+- Partner with Finance and Operations.
+- Collaborate with HR and Legal.
+- Work closely with Engineering.
+- Support Sales and Marketing teams.
+"""
+        )
+
+        for function in ("supply chain", "marketing", "operations"):
+            self.assertNotIn(function, job.skills_required)
+
+    def test_finance_and_legal_collaboration_does_not_create_requirements(self) -> None:
+        job = self.parse_description(
+            "Job Responsibilities\n- Collaborate closely with Finance and Legal."
+        )
+
+        self.assertEqual(job.skills_required, [])
+
+    def test_supply_chain_experience_remains_a_legitimate_requirement(self) -> None:
+        job = self.parse_description(
+            "Qualifications\n- 3+ years of supply chain planning experience required."
+        )
+
+        self.assertIn("supply chain", job.skills_required)
+
+    def test_marketing_analytics_experience_remains_a_legitimate_requirement(self) -> None:
+        job = self.parse_description(
+            "Qualifications\n- Marketing analytics experience required."
+        )
+
+        self.assertIn("marketing", job.skills_required)
+
     def test_forecasting_domain_requirements_are_retained(self) -> None:
         job = self.parse_description(
             """Job Responsibilities

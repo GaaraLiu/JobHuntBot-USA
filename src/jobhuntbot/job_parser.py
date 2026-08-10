@@ -131,6 +131,40 @@ _INDUSTRY_CONTEXT_STOP_HEADINGS = {
     "benefits",
 }
 
+_ADVANCED_EXCEL_RE = re.compile(
+    r"(?:"
+    r"\badvanced(?:\s+(?:proficiency|skills?|expertise|capability))?"
+    r"(?:\s+(?:in|with))?\s+(?:microsoft\s+|ms\s+)?excel\b"
+    r"|"
+    r"\b(?:microsoft\s+|ms\s+)?excel\b\s*(?:"
+    r"\(\s*advanced(?:\s+(?:skills?|proficiency|expertise))?(?:\s+required)?\s*\)"
+    r"|[-:]\s*advanced(?:\s+(?:skills?|proficiency|expertise))?(?:\s+required)?"
+    r")"
+    r")",
+    re.IGNORECASE,
+)
+_ORGANIZATIONAL_FUNCTION_SKILLS = {
+    "engineering",
+    "finance",
+    "human resources",
+    "hr",
+    "legal",
+    "marketing",
+    "operations",
+    "sales",
+    "software engineering",
+    "supply chain",
+}
+_COLLABORATION_CONTEXT_RE = re.compile(
+    r"(?:"
+    r"\b(?:collaborat(?:e|es|ed|ing)|partner(?:s|ed|ing)?|work(?:s|ed|ing)?)"
+    r"(?:\s+closely)?\s+with\b"
+    r"|\b(?:alignment|collaboration|coordination)\s+(?:with|across)\b"
+    r"|\bsupport(?:s|ed|ing)?\b.*\b(?:teams?|departments?|functions?|stakeholders?)\b"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def _salary_number(value: str | None) -> float | None:
     if not value:
@@ -208,6 +242,15 @@ def _industry_context_lines(text: str) -> list[str]:
         if re.search(r"\b(?:industry|sector)\b", line, re.IGNORECASE)
     )
     return list(dict.fromkeys(values))
+
+def _apply_skill_context(line: str, skills: list[str]) -> list[str]:
+    values = list(dict.fromkeys(skills))
+    if "excel" in values and _ADVANCED_EXCEL_RE.search(line):
+        values = [skill for skill in values if skill != "excel"]
+        values.append("advanced excel")
+    if _COLLABORATION_CONTEXT_RE.search(line):
+        values = [skill for skill in values if skill not in _ORGANIZATIONAL_FUNCTION_SKILLS]
+    return values
 
 
 class DeterministicJobParser:
@@ -352,7 +395,7 @@ class DeterministicJobParser:
             for term in self.known_skills:
                 if re.search(r"(?<![A-Za-z0-9])" + re.escape(term.casefold()) + r"(?![A-Za-z0-9])", lowered):
                     line_skills.append(normalize_skill(term, self.aliases))
-            line_skills = list(dict.fromkeys(line_skills))
+            line_skills = _apply_skill_context(line, line_skills)
             if "advanced excel" in line_skills:
                 line_skills = [skill for skill in line_skills if skill != "excel"]
             if not line_skills:

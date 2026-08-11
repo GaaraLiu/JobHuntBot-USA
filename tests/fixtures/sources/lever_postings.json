@@ -1,0 +1,17 @@
+[
+  {
+    "id": "lever-301",
+    "text": "Business Intelligence Analyst",
+    "descriptionPlain": "Create dashboards and analyze data.",
+    "lists": [
+      {"text": "Requirements", "content": "<ul><li>SQL required</li><li>Power BI required</li></ul>"}
+    ],
+    "additionalPlain": "This is a full-time role.",
+    "categories": {"location": "Chicago, IL", "commitment": "Full-time", "team": "Analytics"},
+    "workplaceType": "hybrid",
+    "createdAt": 1785686400000,
+    "hostedUrl": "https://jobs.lever.co/example/lever-301?lever-source=test",
+    "applyUrl": "https://jobs.lever.co/example/lever-301/apply",
+    "salaryRange": {"min": 80000, "max": 105000, "currency": "USD", "interval": "per-year"}
+  }
+]

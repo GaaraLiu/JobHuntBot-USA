@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "id": "ashby-401",
+      "title": "Machine Learning Engineer",
+      "location": "New York, NY",
+      "workplaceType": "Remote",
+      "employmentType": "FullTime",
+      "descriptionPlain": "Develop production machine learning systems with Python and PyTorch.",
+      "publishedAt": "2026-08-03T09:00:00.000Z",
+      "jobUrl": "https://jobs.ashbyhq.com/example/ashby-401?utm_source=test",
+      "applyUrl": "https://jobs.ashbyhq.com/example/ashby-401/application",
+      "isListed": true,
+      "compensation": {
+        "compensationTierSummary": "$140K - $180K",
+        "summaryComponents": [
+          {"compensationType": "Salary", "minValue": 140000, "maxValue": 180000, "currencyCode": "USD", "interval": "1 YEAR"}
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "request": {
+    "timeout_seconds": 15,
+    "retries": 2,
+    "min_interval_seconds": 0.5,
+    "user_agent": "JobHuntBot/0.2 (local public-job discovery)"
+  },
+  "max_jobs_per_target": 100,
+  "max_fetch_per_target": 100,
+  "job_families": {
+    "higher_education": {
+      "keywords": [
+        "assistant professor",
+        "lecturer",
+        "institutional research",
+        "academic program",
+        "university"
+      ]
+    },
+    "data_bi": {
+      "keywords": [
+        "data analyst",
+        "business intelligence",
+        "Power BI",
+        "reporting analyst",
+        "forecast analyst"
+      ]
+    },
+    "urban_transport_gis": {
+      "keywords": [
+        "GIS",
+        "geospatial",
+        "transportation planner",
+        "urban planner",
+        "transit analyst"
+      ]
+    },
+    "applied_ai": {
+      "keywords": [
+        "machine learning",
+        "AI engineer",
+        "data scientist",
+        "computer vision",
+        "applied scientist"
+      ]
+    }
+  },
+  "targets": [
+    {
+      "source": "smartrecruiters",
+      "board": "REPLACE_WITH_COMPANY_IDENTIFIER",
+      "company": "",
+      "enabled": false,
+      "job_families": ["data_bi"],
+      "search_keywords": [],
+      "location_filter": [],
+      "employment_types": ["full-time"],
+      "max_results": 20
+    },
+    {
+      "source": "greenhouse",
+      "board": "REPLACE_WITH_BOARD_TOKEN",
+      "company": "",
+      "enabled": false,
+      "job_families": ["urban_transport_gis"],
+      "search_keywords": [],
+      "location_filter": [],
+      "employment_types": ["full-time"],
+      "max_results": 20
+    },
+    {
+      "source": "lever",
+      "board": "REPLACE_WITH_SITE_NAME",
+      "company": "",
+      "enabled": false,
+      "job_families": ["applied_ai"],
+      "search_keywords": [],
+      "location_filter": [],
+      "employment_types": ["full-time"],
+      "max_results": 20
+    },
+    {
+      "source": "ashby",
+      "board": "REPLACE_WITH_JOB_BOARD_NAME",
+      "company": "",
+      "enabled": false,
+      "job_families": ["higher_education"],
+      "search_keywords": [],
+      "location_filter": [],
+      "employment_types": ["full-time"],
+      "max_results": 20
+    }
+  ]
+}

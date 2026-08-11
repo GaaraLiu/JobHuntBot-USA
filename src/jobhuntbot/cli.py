@@ -1,4 +1,4 @@
-"""Command-line interface for the Phase 1 matching core."""
+"""Command-line interface for local matching and public-ATS discovery."""
 
 from __future__ import annotations
 
@@ -9,17 +9,19 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import ConfigError, load_config
+from .discovery import DiscoveryConfigError, DiscoveryRunner, load_discovery_config
 from .models import PipelineResult, RawJob
 from .pipeline import JobHuntPipeline, PipelineValidationError
 from .profile import ProfileLoadError, load_candidate_profile, validate_candidate_profile
 from .resume_router import ResumeRouter, ResumeRoutingError, load_resume_routing
+from .sources import supported_sources
 from .storage import SchemaMismatchError, StorageError
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="jobhuntbot",
-        description="Local, deterministic, explainable Phase 1 job matching.",
+        description="Local, deterministic, explainable job discovery and matching.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -44,6 +46,34 @@ def _build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--save", action="store_true")
     analyze.add_argument("--job-pool", type=Path, default=Path("dashboard/job_pool.csv"))
     analyze.add_argument("--json", action="store_true", dest="as_json")
+
+    discover = subparsers.add_parser(
+        "discover",
+        help="Discover public ATS jobs, deduplicate, and optionally run Phase 1 analysis.",
+    )
+    discover.add_argument("--profile", required=True, type=Path)
+    discover.add_argument("--discovery-config", required=True, type=Path)
+    discover.add_argument("--resume-routing", type=Path)
+    discover.add_argument("--scoring-config", type=Path)
+    discover.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("my-materials/discovery"),
+        help="Private output directory (default: my-materials/discovery).",
+    )
+    discover.add_argument(
+        "--source",
+        action="append",
+        choices=supported_sources(),
+        help="Limit the run to one or more configured ATS sources.",
+    )
+    discover.add_argument("--limit", type=int, help="Maximum unique jobs for this run.")
+    discover.add_argument(
+        "--discovery-only",
+        action="store_true",
+        help="Fetch, filter, deduplicate, and normalize without scoring or resume routing.",
+    )
+    discover.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -111,11 +141,42 @@ def _print_pipeline_result(result: PipelineResult, as_json: bool) -> None:
         print(f"\nJob pool: {result.storage_action}")
 
 
+def _print_discovery_summary(summary, as_json: bool) -> None:
+    value = summary.to_dict()
+    if as_json:
+        print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    print(f"Discovery completed: {summary.completed_at}")
+    print(f"Sources: {', '.join(summary.selected_sources) or 'none'}")
+    print(f"Targets attempted: {summary.targets_attempted}")
+    print(f"Jobs fetched: {summary.jobs_fetched}")
+    print(f"Jobs retained after filters: {summary.jobs_after_filters}")
+    print(f"Unique jobs after deduplication: {summary.jobs_after_deduplication}")
+    print(f"Duplicates removed: {summary.duplicates_removed}")
+    print(f"Jobs normalized: {summary.jobs_normalized}")
+    print(f"Jobs analyzed: {summary.jobs_analyzed}")
+    print(f"Failures captured: {summary.failure_count}")
+    print(f"Private output: {summary.output_dir}")
+    if summary.job_pool:
+        print(f"Ranked job pool: {summary.job_pool}")
+
+
 def _resolve_resume_routing(profile_path: Path, configured: str, explicit: Path | None) -> Path:
     if explicit is not None:
         return explicit
     configured_path = Path(configured)
     return configured_path if configured_path.is_absolute() else profile_path.parent / configured_path
+
+
+def _load_analysis_dependencies(profile_path: Path, routing_override: Path | None, config_path: Path | None):
+    profile = load_candidate_profile(profile_path)
+    config = load_config(config_path)
+    routing_path = _resolve_resume_routing(
+        profile_path, profile.resume_routing_file, routing_override
+    )
+    routing = load_resume_routing(routing_path)
+    router = ResumeRouter(routing, config.normalization.get("skill_aliases", {}))
+    return profile, config, router
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -128,11 +189,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_profile_validation(args.profile, result, args.as_json)
             return 0 if result.valid else 1
 
-        profile = load_candidate_profile(args.profile)
-        config = load_config(args.config)
-        routing_path = _resolve_resume_routing(args.profile, profile.resume_routing_file, args.resume_routing)
-        routing = load_resume_routing(routing_path)
-        router = ResumeRouter(routing, config.normalization.get("skill_aliases", {}))
+        if args.command == "discover":
+            profile, config, router = _load_analysis_dependencies(
+                args.profile, args.resume_routing, args.scoring_config
+            )
+            discovery_config = load_discovery_config(args.discovery_config)
+            runner = DiscoveryRunner(
+                profile=profile,
+                app_config=config,
+                resume_router=router,
+                discovery_config=discovery_config,
+                output_dir=args.output_dir,
+            )
+            summary = runner.run(
+                sources=args.source,
+                limit=args.limit,
+                discovery_only=args.discovery_only,
+            )
+            _print_discovery_summary(summary, args.as_json)
+            return 0
+
+        profile, config, router = _load_analysis_dependencies(
+            args.profile, args.resume_routing, args.config
+        )
         try:
             description = args.description_file.read_text(encoding="utf-8")
         except OSError as exc:
@@ -155,6 +234,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (
         ConfigError,
+        DiscoveryConfigError,
         ProfileLoadError,
         ResumeRoutingError,
         PipelineValidationError,
@@ -167,4 +247,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

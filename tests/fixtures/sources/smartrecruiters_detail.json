@@ -1,0 +1,15 @@
+{
+  "id": "sr-101",
+  "name": "Data Analyst",
+  "company": {"name": "Example Analytics"},
+  "releasedDate": "2026-08-01T12:00:00Z",
+  "location": {"city": "New York", "region": "NY", "country": "us", "remote": false},
+  "typeOfEmployment": {"label": "Full-time"},
+  "applyUrl": "https://jobs.smartrecruiters.com/example/sr-101?utm_source=test",
+  "jobAd": {
+    "sections": {
+      "jobDescription": {"title": "Job Description", "text": "<p>Build Power BI dashboards and SQL reports.</p>"},
+      "qualifications": {"title": "Qualifications", "text": "<ul><li>Power BI required</li><li>SQL required</li></ul>"}
+    }
+  }
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -50,5 +51,38 @@ class CliTests(unittest.TestCase):
         self.assertIn("Resume recommendation:", text)
 
 
+    def test_discover_command_supports_private_output_and_json_summary(self) -> None:
+        output = io.StringIO()
+        errors = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "discovery.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "job_families": {
+                            "data_bi": {"keywords": ["data analyst"]}
+                        },
+                        "targets": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            private_output = root / "my-materials" / "discovery"
+            with redirect_stdout(output), redirect_stderr(errors):
+                exit_code = main([
+                    "discover",
+                    "--profile", str(FIXTURES / "profile_valid.json"),
+                    "--resume-routing", str(FIXTURES / "resume_routing_valid.json"),
+                    "--discovery-config", str(config),
+                    "--output-dir", str(private_output),
+                    "--json",
+                ])
+            value = json.loads(output.getvalue())
+            self.assertTrue((private_output / "job_pool.csv").exists())
+        self.assertEqual(exit_code, 0, errors.getvalue())
+        self.assertEqual(value["jobs_fetched"], 0)
+        self.assertEqual(value["jobs_analyzed"], 0)
 if __name__ == "__main__":
     unittest.main()

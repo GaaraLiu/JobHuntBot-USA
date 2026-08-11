@@ -1,0 +1,12 @@
+{
+  "content": [
+    {
+      "id": "sr-101",
+      "name": "Data Analyst",
+      "company": {"name": "Example Analytics"},
+      "releasedDate": "2026-08-01T12:00:00Z",
+      "location": {"city": "New York", "region": "NY", "country": "us", "remote": false},
+      "typeOfEmployment": {"label": "Full-time"}
+    }
+  ]
+}

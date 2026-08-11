@@ -1,6 +1,6 @@
 # Phase 2: U.S. job discovery
 
-Phase 2 retrieves public employer postings from supported ATS interfaces, keeps their source evidence, deterministically removes duplicates, and sends each full job description through the frozen Phase 1 parser, scorer, and resume router. It does not automate applications.
+Phase 2 retrieves public employer postings from supported ATS interfaces, keeps their source evidence, and deterministically removes duplicates. Phase 2.1 applies frozen Phase 1 normalization (including seniority), then adds an explainable relevance gate and private incremental state before scoring and resume routing. It does not automate applications.
 
 ## Supported public sources
 
@@ -13,9 +13,13 @@ Only public, employer-provided listing interfaces are used. The HTTP client has 
 
 ## Configuration
 
-Copy `templates/discovery_config.template.json` to the ignored private path `my-materials/discovery/discovery_config.json`. A target has a supported `source`, its ATS `board` identifier, optional display `company`, `enabled`, optional `job_families` and `search_keywords`, optional `location_filter`, optional `employment_types`, and optional `max_results`.
+Copy `templates/discovery_config.template.json` to the ignored private path `my-materials/discovery/discovery_config.json`. A target has a supported `source`, its ATS `board` identifier, optional display `company`, `enabled`, optional career-track restrictions in `job_families`, explicit `search_keywords`, optional `location_filter`, optional `employment_types`, `max_pages`, `max_results`, and optional `posted_within_days`.
 
-The four initial search families are `higher_education`, `data_bi`, `urban_transport_gis`, and `applied_ai`. Their keyword lists are discovery filters only; they do not alter Phase 1 job-family parsing or scoring. An absent ATS location or employment type remains unknown and is retained rather than guessed. Candidate location policy remains in the private candidate profile/config and is evaluated by Phase 1.
+The four initial tracks are `higher_education`, `data_bi`, `urban_transport_gis`, and `applied_ai`. Each track can configure title aliases, title/category/description evidence, positive terms, exclusion terms, and advanced-seniority exceptions. Title and category evidence have higher deterministic weights than description evidence. Generic words such as `data`, `analysis`, `technology`, `business`, `research`, and `engineering` are explicitly prevented from establishing relevance on their own. These settings do not alter Phase 1 job-family parsing or scoring.
+
+`location_policy` is a private discovery gate for `allowed_countries` (U.S.-only by default), primary markets, U.S. remote terms, relocation markets, exclusions, and whether other confirmed U.S. locations remain reviewable. Explicit ATS country metadata takes precedence; otherwise deterministic country/state evidence is used. Known non-U.S. jobs are `international` and excluded unless their country is explicitly allowed. Ambiguous locations remain `unknown`. The tracked template contains no private cities. The optional freshness filter uses a source's explicit updated date, then posted date; a missing or unparseable date remains `UNKNOWN` and is retained.
+
+SmartRecruiters and Lever use bounded server pagination (`offset` and `skip` respectively). Greenhouse and Ashby publish their current job-board collection in one response, so those adapters use one request and apply a client-side result cap. Every target is bounded by `max_pages`, `max_results`, and the global fetch cap.
 
 The template targets are disabled placeholders. Do not commit real board targets, credentials, candidate data, or discovered postings.
 
@@ -43,7 +47,9 @@ python -m jobhuntbot discover \
   --output-dir my-materials/discovery
 ```
 
-Repeat `--source greenhouse` (or another supported source) to limit sources. Add `--limit 10` for a bounded run. Add `--discovery-only` to retrieve, filter, deduplicate, and normalize without scoring or resume routing. Add `--json` for a machine-readable run summary.
+Repeat `--source greenhouse` (or another supported source) to limit sources. Add `--limit 10` for a bounded run. Add `--discovery-only` to retrieve, filter, deduplicate, normalize, and evaluate relevance without scoring or resume routing. Add `--reanalyze-unchanged` only when an explicit repeat analysis is needed. Add `--json` for a machine-readable run summary.
+
+When `incremental.enabled` is true, stable `job_id` plus a deterministic content fingerprint drives analysis: new and changed jobs are analyzed, unchanged jobs reuse their private prior result, and a missing prior artifact triggers recovery analysis. The private JSON state records first/last seen, last analyzed, source/native ID, fingerprint, prior decision, resume, and latest relevance result. No database is required.
 
 ## Private outputs
 
@@ -51,9 +57,13 @@ The default output root is ignored `my-materials/discovery/`:
 
 - `raw/`: adapter records, including source metadata
 - `normalized/`: canonical Phase 1 `NormalizedJob` JSON
-- `results/`: complete Phase 1 score and resume-route JSON
+- `results/`: complete Phase 1 score and resume-route JSON for relevant analyzed jobs
+- `recommended/`: current and per-job relevant records, including relevance and incremental explanations
+- `irrelevant/`: current and per-job exclusions; raw evidence is retained and these jobs do not enter scoring
+- `errors/`: current and per-error source/analysis failures
+- `state/discovery_state.json`: private incremental state
 - `discovery_log.jsonl`: source failures, job failures, duplicate reasons, and run summaries
-- `job_pool.csv`: the current run ranked by decision, score, and evidence coverage
+- `job_pool.csv`: relevant current-run jobs ranked by decision, score, and evidence coverage
 
 All APPLY, REVIEW, and SKIP results are retained. Real discovery never writes `dashboard/job_pool.csv` by default. One source or posting failure is logged without aborting other targets.
 

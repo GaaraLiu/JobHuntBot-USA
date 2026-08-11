@@ -6,45 +6,126 @@
     "min_interval_seconds": 0.5,
     "user_agent": "JobHuntBot/0.2 (local public-job discovery)"
   },
-  "max_jobs_per_target": 100,
-  "max_fetch_per_target": 100,
-  "job_families": {
+  "max_jobs_per_target": 30,
+  "max_fetch_per_target": 30,
+  "max_pages": 2,
+  "posted_within_days": null,
+  "relevance_policy": {
+    "enabled": true,
+    "title_weight": 4,
+    "category_weight": 3,
+    "description_weight": 1,
+    "positive_weight": 1,
+    "minimum_score": 4,
+    "strong_score": 8,
+    "generic_terms": [
+      "data",
+      "analysis",
+      "technology",
+      "business",
+      "research",
+      "engineering"
+    ],
+    "global_exclusion_terms": [
+      "cnc machine operator",
+      "facilities electrical engineer",
+      "engineering manager",
+      "product designer"
+    ],
+    "excluded_seniority_levels": [
+      "staff",
+      "principal",
+      "director",
+      "vp",
+      "executive"
+    ]
+  },
+  "career_tracks": {
     "higher_education": {
-      "keywords": [
+      "enabled": true,
+      "aliases": ["academic advisor", "institutional research analyst"],
+      "title_terms": [
         "assistant professor",
         "lecturer",
-        "institutional research",
-        "academic program",
-        "university"
-      ]
+        "instructor",
+        "academic advisor",
+        "institutional research analyst",
+        "student success coordinator"
+      ],
+      "category_terms": ["higher education", "academic affairs", "student affairs"],
+      "description_terms": ["student advising", "academic programs", "institutional research"],
+      "positive_terms": ["curriculum development", "student success", "program assessment"],
+      "exclusion_terms": [],
+      "minimum_description_matches": 2,
+      "allow_seniority_levels": []
     },
     "data_bi": {
-      "keywords": [
+      "enabled": true,
+      "aliases": ["bi analyst", "reporting analyst"],
+      "title_terms": [
         "data analyst",
-        "business intelligence",
-        "Power BI",
+        "business intelligence analyst",
+        "bi analyst",
         "reporting analyst",
-        "forecast analyst"
-      ]
+        "forecast analyst",
+        "analytics analyst"
+      ],
+      "category_terms": ["analytics", "business intelligence", "reporting"],
+      "description_terms": ["power bi", "tableau", "sql", "dashboard development", "kpi reporting"],
+      "positive_terms": ["data visualization", "forecasting", "database reporting"],
+      "exclusion_terms": [],
+      "minimum_description_matches": 2,
+      "allow_seniority_levels": []
     },
     "urban_transport_gis": {
-      "keywords": [
-        "GIS",
-        "geospatial",
+      "enabled": true,
+      "aliases": ["gis analyst", "transportation planner"],
+      "title_terms": [
+        "gis analyst",
+        "geospatial analyst",
         "transportation planner",
         "urban planner",
         "transit analyst"
-      ]
+      ],
+      "category_terms": ["transportation", "urban planning", "geospatial"],
+      "description_terms": ["arcgis", "qgis", "spatial analysis", "transit planning", "transportation planning"],
+      "positive_terms": ["gis mapping", "land use", "mobility analysis"],
+      "exclusion_terms": [],
+      "minimum_description_matches": 2,
+      "allow_seniority_levels": []
     },
     "applied_ai": {
-      "keywords": [
-        "machine learning",
-        "AI engineer",
-        "data scientist",
-        "computer vision",
-        "applied scientist"
-      ]
+      "enabled": true,
+      "aliases": ["machine learning analyst", "ai analyst"],
+      "title_terms": [
+        "machine learning analyst",
+        "junior machine learning engineer",
+        "ai analyst",
+        "applied ai analyst",
+        "junior data scientist",
+        "computer vision analyst"
+      ],
+      "category_terms": ["machine learning", "artificial intelligence", "data science"],
+      "description_terms": ["machine learning", "computer vision", "model development", "pytorch", "tensorflow"],
+      "positive_terms": ["python", "model evaluation", "applied ai"],
+      "exclusion_terms": [],
+      "minimum_description_matches": 2,
+      "allow_seniority_levels": []
     }
+  },
+  "location_policy": {
+    "enabled": false,
+    "allowed_countries": ["US"],
+    "primary_markets": ["REPLACE_WITH_PRIVATE_PRIMARY_MARKET"],
+    "remote_terms": ["REPLACE_WITH_PRIVATE_REMOTE_POLICY"],
+    "relocation_markets": ["REPLACE_WITH_PRIVATE_RELOCATION_MARKET"],
+    "exclusion_terms": [],
+    "allow_other_locations": true
+  },
+  "incremental": {
+    "enabled": true,
+    "state_file": "state/discovery_state.json",
+    "reanalyze_unchanged": false
   },
   "targets": [
     {
@@ -56,7 +137,8 @@
       "search_keywords": [],
       "location_filter": [],
       "employment_types": ["full-time"],
-      "max_results": 20
+      "max_pages": 2,
+      "max_results": 10
     },
     {
       "source": "greenhouse",
@@ -67,7 +149,8 @@
       "search_keywords": [],
       "location_filter": [],
       "employment_types": ["full-time"],
-      "max_results": 20
+      "max_pages": 1,
+      "max_results": 10
     },
     {
       "source": "lever",
@@ -78,7 +161,8 @@
       "search_keywords": [],
       "location_filter": [],
       "employment_types": ["full-time"],
-      "max_results": 20
+      "max_pages": 2,
+      "max_results": 10
     },
     {
       "source": "ashby",
@@ -89,7 +173,8 @@
       "search_keywords": [],
       "location_filter": [],
       "employment_types": ["full-time"],
-      "max_results": 20
+      "max_pages": 1,
+      "max_results": 10
     }
   ]
 }

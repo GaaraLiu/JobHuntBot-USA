@@ -51,6 +51,7 @@ class SourceJob:
     work_mode: str = ""
     employment_type: str = ""
     posted_date: str = ""
+    updated_date: str = ""
     salary: SourceSalary | None = None
     source_url: str = ""
     apply_url: str = ""
@@ -61,6 +62,7 @@ class SourceJob:
             "work_mode": self.work_mode,
             "employment_type": self.employment_type,
             "salary": None if self.salary is None else self.salary.to_dict(),
+            "updated_date": self.updated_date,
         }
         return RawJob(
             title=self.title,
@@ -101,6 +103,7 @@ class SourceFailure:
 class SourceBatch:
     jobs: list[SourceJob] = field(default_factory=list)
     errors: list[SourceFailure] = field(default_factory=list)
+    pages_fetched: int = 0
 
 
 @dataclass(slots=True)
@@ -114,6 +117,8 @@ class DiscoveryTarget:
     employment_types: list[str] = field(default_factory=list)
     job_families: list[str] = field(default_factory=list)
     max_results: int | None = None
+    max_pages: int = 1
+    posted_within_days: int | None = None
     options: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -128,6 +133,8 @@ class DiscoveryTarget:
             "employment_types",
             "job_families",
             "max_results",
+            "max_pages",
+            "posted_within_days",
         }
         source = str(value.get("source", "")).strip().casefold()
         board = str(value.get("board", value.get("company_identifier", ""))).strip()
@@ -137,18 +144,11 @@ class DiscoveryTarget:
             raise SourceConfigurationError(
                 f"Discovery target for source '{source}' requires a board/company identifier."
             )
-        max_results = value.get("max_results")
-        if max_results is not None:
-            if isinstance(max_results, bool):
-                raise SourceConfigurationError("max_results must be a positive integer or null.")
-            try:
-                max_results = int(max_results)
-            except (TypeError, ValueError) as exc:
-                raise SourceConfigurationError(
-                    "max_results must be a positive integer or null."
-                ) from exc
-            if max_results < 1:
-                raise SourceConfigurationError("max_results must be positive.")
+        max_results = _optional_positive_int(value.get("max_results"), "max_results")
+        max_pages = _optional_positive_int(value.get("max_pages", 1), "max_pages") or 1
+        posted_within_days = _optional_positive_int(
+            value.get("posted_within_days"), "posted_within_days"
+        )
         return cls(
             source=source,
             board=board,
@@ -159,6 +159,8 @@ class DiscoveryTarget:
             employment_types=_strings(value.get("employment_types")),
             job_families=_strings(value.get("job_families")),
             max_results=max_results,
+            max_pages=max_pages,
+            posted_within_days=posted_within_days,
             options={key: item for key, item in value.items() if key not in known},
         )
 
@@ -367,3 +369,18 @@ def _strings(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+def _optional_positive_int(value: Any, field_name: str) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise SourceConfigurationError(f"{field_name} must be a positive integer or null.")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise SourceConfigurationError(
+            f"{field_name} must be a positive integer or null."
+        ) from exc
+    if parsed < 1:
+        raise SourceConfigurationError(f"{field_name} must be positive.")
+    return parsed

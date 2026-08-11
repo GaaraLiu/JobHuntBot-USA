@@ -98,6 +98,7 @@ def _merge_missing_fields(kept: SourceJob, duplicate: SourceJob) -> None:
         "work_mode",
         "employment_type",
         "posted_date",
+        "updated_date",
         "source_url",
         "apply_url",
     ):
@@ -106,6 +107,12 @@ def _merge_missing_fields(kept: SourceJob, duplicate: SourceJob) -> None:
     if kept.salary is None and duplicate.salary is not None:
         kept.salary = duplicate.salary
     metadata: dict[str, Any] = dict(kept.metadata)
+    kept_tracks = metadata.get("_discovery_tracks", [])
+    duplicate_tracks = duplicate.metadata.get("_discovery_tracks", [])
+    if isinstance(kept_tracks, list) and isinstance(duplicate_tracks, list):
+        metadata["_discovery_tracks"] = list(
+            dict.fromkeys([*kept_tracks, *duplicate_tracks])
+        )
     duplicate_sources = list(metadata.get("duplicate_sources") or [])
     duplicate_sources.append(
         {

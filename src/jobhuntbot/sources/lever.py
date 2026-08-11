@@ -27,96 +27,123 @@ class LeverAdapter:
         self.client = client
 
     def fetch(self, target: DiscoveryTarget, *, limit: int | None = None) -> SourceBatch:
-        base = "https://api.eu.lever.co" if target.options.get("region") == "eu" else "https://api.lever.co"
-        params: dict[str, Any] = {"mode": "json"}
-        if limit is not None:
-            params["limit"] = limit
-        url = (
-            f"{base}/v0/postings/{quote(target.board, safe='')}?"
-            f"{urlencode(params)}"
+        base = (
+            "https://api.eu.lever.co"
+            if target.options.get("region") == "eu"
+            else "https://api.lever.co"
         )
+        max_records = limit or target.max_results or (100 * target.max_pages)
+        max_records = max(1, max_records)
         batch = SourceBatch()
-        try:
-            payload = self.client.get_json(url)
-        except SourceRequestError as exc:
-            batch.errors.append(
-                SourceFailure(
-                    source=self.source,
-                    url=exc.url,
-                    error_type=type(exc).__name__,
-                    reason=exc.reason,
-                )
+        processed = 0
+        page_size = _page_size(target.options.get("page_size"))
+        for _page in range(target.max_pages):
+            remaining = max_records - processed
+            if remaining <= 0:
+                break
+            page_limit = min(remaining, page_size)
+            params: dict[str, Any] = {
+                "mode": "json",
+                "skip": processed,
+                "limit": page_limit,
+            }
+            url = (
+                f"{base}/v0/postings/{quote(target.board, safe='')}?"
+                f"{urlencode(params)}"
             )
-            return batch
-        if not isinstance(payload, list):
-            batch.errors.append(
-                SourceFailure(
-                    source=self.source,
-                    url=url,
-                    error_type="MalformedSourceResponse",
-                    reason="Lever response is not a postings list.",
-                )
-            )
-            return batch
-        selected = payload[:limit] if limit is not None else payload
-        for item in selected:
-            job_id = ""
             try:
-                if not isinstance(item, Mapping):
-                    raise ValueError("Posting is not an object.")
-                job_id = str(item.get("id") or "").strip()
-                title = str(item.get("text") or "").strip()
-                if not job_id:
-                    raise ValueError("Posting is missing native job id.")
-                if not title:
-                    raise ValueError("Posting is missing title.")
-                description = self._description(item)
-                if not description:
-                    raise ValueError("Posting is missing full job description.")
-                categories = item.get("categories") or {}
-                if not isinstance(categories, Mapping):
-                    categories = {}
-                hosted_url = str(item.get("hostedUrl") or "").strip()
-                apply_url = str(item.get("applyUrl") or "").strip()
-                batch.jobs.append(
-                    SourceJob(
+                payload = self.client.get_json(url)
+            except SourceRequestError as exc:
+                batch.errors.append(
+                    SourceFailure(
                         source=self.source,
-                        source_job_id=job_id,
-                        company=target.company or target.board,
-                        title=title,
-                        description=description,
-                        location=str(categories.get("location") or "").strip(),
-                        work_mode=normalize_work_mode(item.get("workplaceType")),
-                        employment_type=normalize_employment_type(
-                            categories.get("commitment")
-                        ),
-                        posted_date=normalize_posted_date(
-                            item.get("createdAt") or item.get("created_at")
-                        ),
-                        salary=self._salary(item.get("salaryRange")),
-                        source_url=hosted_url,
-                        apply_url=apply_url,
-                        metadata={
-                            "board": target.board,
-                            "categories": dict(categories),
-                            "country": item.get("country"),
-                            "workplace_type": item.get("workplaceType"),
-                            "salary_description": item.get("salaryDescriptionPlain"),
-                        },
+                        url=exc.url,
+                        error_type=type(exc).__name__,
+                        reason=exc.reason,
                     )
                 )
-            except (ValueError, TypeError) as exc:
+                break
+            batch.pages_fetched += 1
+            if not isinstance(payload, list):
                 batch.errors.append(
                     SourceFailure(
                         source=self.source,
                         url=url,
-                        job_id=job_id,
-                        error_type=type(exc).__name__,
-                        reason=str(exc),
+                        error_type="MalformedSourceResponse",
+                        reason="Lever response is not a postings list.",
                     )
                 )
+                break
+            selected = payload[:remaining]
+            processed += len(selected)
+            for item in selected:
+                self._append_job(batch, target, item, url)
+            if len(payload) < page_limit:
+                break
         return batch
 
+    def _append_job(
+        self,
+        batch: SourceBatch,
+        target: DiscoveryTarget,
+        item: Any,
+        url: str,
+    ) -> None:
+        job_id = ""
+        try:
+            if not isinstance(item, Mapping):
+                raise ValueError("Posting is not an object.")
+            job_id = str(item.get("id") or "").strip()
+            title = str(item.get("text") or "").strip()
+            if not job_id:
+                raise ValueError("Posting is missing native job id.")
+            if not title:
+                raise ValueError("Posting is missing title.")
+            description = self._description(item)
+            if not description:
+                raise ValueError("Posting is missing full job description.")
+            categories = item.get("categories") or {}
+            if not isinstance(categories, Mapping):
+                categories = {}
+            hosted_url = str(item.get("hostedUrl") or "").strip()
+            apply_url = str(item.get("applyUrl") or "").strip()
+            batch.jobs.append(
+                SourceJob(
+                    source=self.source,
+                    source_job_id=job_id,
+                    company=target.company or target.board,
+                    title=title,
+                    description=description,
+                    location=str(categories.get("location") or "").strip(),
+                    work_mode=normalize_work_mode(item.get("workplaceType")),
+                    employment_type=normalize_employment_type(
+                        categories.get("commitment")
+                    ),
+                    posted_date=normalize_posted_date(
+                        item.get("createdAt") or item.get("created_at")
+                    ),
+                    salary=self._salary(item.get("salaryRange")),
+                    source_url=hosted_url,
+                    apply_url=apply_url,
+                    metadata={
+                        "board": target.board,
+                        "categories": dict(categories),
+                        "country": item.get("country"),
+                        "workplace_type": item.get("workplaceType"),
+                        "salary_description": item.get("salaryDescriptionPlain"),
+                    },
+                )
+            )
+        except (ValueError, TypeError) as exc:
+            batch.errors.append(
+                SourceFailure(
+                    source=self.source,
+                    url=url,
+                    job_id=job_id,
+                    error_type=type(exc).__name__,
+                    reason=str(exc),
+                )
+            )
     def _description(self, item: Mapping[str, Any]) -> str:
         values: list[str] = []
         primary = str(item.get("descriptionPlain") or "").strip()
@@ -165,3 +192,10 @@ def _number(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _page_size(value: Any) -> int:
+    try:
+        return min(100, max(1, int(value or 100)))
+    except (TypeError, ValueError):
+        return 100

@@ -36,6 +36,7 @@ class AshbyAdapter:
         batch = SourceBatch()
         try:
             payload = self.client.get_json(url)
+            batch.pages_fetched = 1
         except SourceRequestError as exc:
             batch.errors.append(
                 SourceFailure(

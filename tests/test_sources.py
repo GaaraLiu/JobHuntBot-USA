@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from jobhuntbot.sources import DiscoveryTarget, SourceRequestError, create_adapter, supported_sources
 from jobhuntbot.sources.ashby import AshbyAdapter
@@ -41,6 +42,44 @@ class FixtureClient:
             return _fixture("lever_postings.json")
         if "api.ashbyhq.com" in url:
             return _fixture("ashby_jobs.json")
+        raise AssertionError(f"Unexpected URL: {url}")
+
+
+class PaginationClient:
+    def __init__(self):
+        self.urls: list[str] = []
+
+    def get_json(self, url: str, *, headers=None) -> Any:
+        self.urls.append(url)
+        query = parse_qs(urlsplit(url).query)
+        if "api.smartrecruiters.com" in url:
+            marker = "/postings/"
+            if marker in urlsplit(url).path:
+                job_id = urlsplit(url).path.rsplit("/", 1)[-1]
+                return {
+                    "id": job_id,
+                    "name": f"Data Analyst {job_id}",
+                    "company": {"name": "Example"},
+                    "location": {"city": "New York", "region": "NY", "country": "us"},
+                    "jobAd": {"sections": {"jobDescription": {"text": "Power BI and SQL."}}},
+                    "applyUrl": f"https://jobs.example.test/{job_id}",
+                }
+            offset = int(query.get("offset", ["0"])[0])
+            ids = ["sr-1", "sr-2"] if offset == 0 else ["sr-3"]
+            return {"content": [{"id": item} for item in ids], "totalFound": 3}
+        if "api.lever.co" in url:
+            skip = int(query.get("skip", ["0"])[0])
+            ids = ["lever-1", "lever-2"] if skip == 0 else ["lever-3"]
+            return [
+                {
+                    "id": item,
+                    "text": f"Data Analyst {item}",
+                    "descriptionPlain": "Power BI and SQL.",
+                    "categories": {"location": "New York, NY"},
+                    "hostedUrl": f"https://jobs.example.test/{item}",
+                }
+                for item in ids
+            ]
         raise AssertionError(f"Unexpected URL: {url}")
 
 
@@ -116,6 +155,44 @@ class SourceAdapterTests(unittest.TestCase):
         self.assertEqual(batch.jobs, [])
         self.assertEqual(len(batch.errors), 1)
         self.assertIn("controlled network failure", batch.errors[0].reason)
+
+    def test_smartrecruiters_controlled_pagination_uses_offset_and_page_cap(self) -> None:
+        client = PaginationClient()
+        target = DiscoveryTarget(
+            source="smartrecruiters",
+            board="example",
+            company="Example",
+            max_pages=2,
+            options={"page_size": 2},
+        )
+        batch = SmartRecruitersAdapter(client).fetch(target, limit=3)
+        self.assertEqual([job.source_job_id for job in batch.jobs], ["sr-1", "sr-2", "sr-3"])
+        self.assertEqual(batch.pages_fetched, 2)
+        list_urls = [url for url in client.urls if "/postings/" not in urlsplit(url).path]
+        self.assertEqual(
+            [parse_qs(urlsplit(url).query)["offset"][0] for url in list_urls],
+            ["0", "2"],
+        )
+
+    def test_lever_controlled_pagination_uses_skip_and_page_cap(self) -> None:
+        client = PaginationClient()
+        target = DiscoveryTarget(
+            source="lever",
+            board="example",
+            company="Example",
+            max_pages=2,
+            options={"page_size": 2},
+        )
+        batch = LeverAdapter(client).fetch(target, limit=3)
+        self.assertEqual(
+            [job.source_job_id for job in batch.jobs],
+            ["lever-1", "lever-2", "lever-3"],
+        )
+        self.assertEqual(batch.pages_fetched, 2)
+        self.assertEqual(
+            [parse_qs(urlsplit(url).query)["skip"][0] for url in client.urls],
+            ["0", "2"],
+        )
 
 
 if __name__ == "__main__":

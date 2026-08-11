@@ -73,6 +73,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fetch, filter, deduplicate, and normalize without scoring or resume routing.",
     )
+    discover.add_argument(
+        "--reanalyze-unchanged",
+        action="store_true",
+        help="Explicitly re-analyze unchanged jobs when incremental discovery is enabled.",
+    )
     discover.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
@@ -155,6 +160,13 @@ def _print_discovery_summary(summary, as_json: bool) -> None:
     print(f"Duplicates removed: {summary.duplicates_removed}")
     print(f"Jobs normalized: {summary.jobs_normalized}")
     print(f"Jobs analyzed: {summary.jobs_analyzed}")
+    print(f"Relevant jobs: {summary.jobs_relevant}")
+    print(f"Irrelevant jobs: {summary.jobs_irrelevant}")
+    print(f"Unchanged jobs skipped: {summary.jobs_skipped_unchanged}")
+    print(
+        "Decisions: "
+        f"APPLY={summary.apply_count}, REVIEW={summary.review_count}, SKIP={summary.skip_count}"
+    )
     print(f"Failures captured: {summary.failure_count}")
     print(f"Private output: {summary.output_dir}")
     if summary.job_pool:
@@ -205,6 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sources=args.source,
                 limit=args.limit,
                 discovery_only=args.discovery_only,
+                reanalyze_unchanged=args.reanalyze_unchanged,
             )
             _print_discovery_summary(summary, args.as_json)
             return 0

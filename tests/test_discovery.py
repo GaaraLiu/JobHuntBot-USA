@@ -10,6 +10,7 @@ from jobhuntbot.config import load_config
 from jobhuntbot.discovery import (
     DiscoveryConfig,
     DiscoveryConfigError,
+    IncrementalPolicy,
     DiscoveryRunner,
     SourceAwareParser,
     load_discovery_config,
@@ -17,6 +18,7 @@ from jobhuntbot.discovery import (
 from jobhuntbot.models import RawJob
 from jobhuntbot.profile import load_candidate_profile
 from jobhuntbot.resume_router import ResumeRouter, load_resume_routing
+from jobhuntbot.relevance import CareerTrack, RelevancePolicy
 from jobhuntbot.sources import DiscoveryTarget, SourceBatch, SourceJob, SourceSalary
 
 
@@ -90,6 +92,20 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(config.job_families), 4)
         self.assertEqual(config.targets[0].source, "greenhouse")
         self.assertEqual(config.targets[0].job_families, ["data_bi"])
+
+    def test_phase_2_1_template_loads_targeted_incremental_settings(self) -> None:
+        template = Path(__file__).parents[1] / "templates" / "discovery_config.template.json"
+        config = load_discovery_config(template)
+        self.assertEqual(set(config.career_tracks), {
+            "higher_education",
+            "data_bi",
+            "urban_transport_gis",
+            "applied_ai",
+        })
+        self.assertTrue(config.relevance_policy.enabled)
+        self.assertTrue(config.incremental.enabled)
+        self.assertEqual(config.incremental.state_file, "state/discovery_state.json")
+        self.assertEqual(config.targets[0].max_pages, 2)
 
     def test_config_rejects_unsupported_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -199,6 +215,105 @@ class DiscoveryTests(unittest.TestCase):
             self.assertFalse((output_dir / "job_pool.csv").exists())
         self.assertEqual(summary.jobs_normalized, 1)
         self.assertEqual(summary.jobs_analyzed, 0)
+
+    def test_freshness_filter_preserves_unknown_and_excludes_stale(self) -> None:
+        config = DiscoveryConfig()
+        runner = DiscoveryRunner(
+            profile=self.profile,
+            app_config=self.app_config,
+            resume_router=self.router,
+            discovery_config=config,
+            output_dir="unused",
+        )
+        target = DiscoveryTarget(
+            source="greenhouse",
+            board="example",
+            posted_within_days=30,
+        )
+        unknown = self._job()
+        matched, _, freshness = runner._matches_target(unknown, target)
+        self.assertTrue(matched)
+        self.assertEqual(freshness, "unknown")
+
+        stale = self._job("stale")
+        stale.posted_date = "2000-01-01"
+        matched, reason, freshness = runner._matches_target(stale, target)
+        self.assertFalse(matched)
+        self.assertEqual(freshness, "stale")
+        self.assertIn("posted_within_days=30", reason)
+
+    def test_targeted_incremental_run_separates_queues_and_reuses_unchanged_result(self) -> None:
+        relevant = self._job()
+        irrelevant = SourceJob(
+            source="greenhouse",
+            source_job_id="cnc-1",
+            company="Factory",
+            title="CNC Machine Operator",
+            description="Operate CNC machinery and review production data.",
+            location="New York, NY",
+            source_url="https://example.test/cnc-1",
+        )
+        config = DiscoveryConfig(
+            targets=[DiscoveryTarget(source="greenhouse", board="example")],
+            career_tracks={
+                "data_bi": CareerTrack(
+                    name="data_bi",
+                    title_terms=["data analyst"],
+                    description_terms=["power bi", "sql"],
+                )
+            },
+            relevance_policy=RelevancePolicy(
+                enabled=True,
+                global_exclusion_terms=["cnc machine operator"],
+            ),
+            incremental=IncrementalPolicy(enabled=True),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "my-materials" / "discovery"
+
+            def run_with(jobs):
+                return DiscoveryRunner(
+                    profile=self.profile,
+                    app_config=self.app_config,
+                    resume_router=self.router,
+                    discovery_config=config,
+                    output_dir=output_dir,
+                    adapter_factory=lambda source, client: FixedAdapter(jobs),
+                ).run()
+
+            first = run_with([relevant, irrelevant])
+            self.assertEqual(first.jobs_relevant, 1)
+            self.assertEqual(first.jobs_irrelevant, 1)
+            self.assertEqual(first.jobs_analyzed, 1)
+            self.assertEqual(first.jobs_new, 1)
+
+            recommended = json.loads(
+                (output_dir / "recommended" / "current_queue.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            excluded = json.loads(
+                (output_dir / "irrelevant" / "current_queue.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual([item["title"] for item in recommended], ["GIS Data Analyst"])
+            self.assertEqual([item["title"] for item in excluded], ["CNC Machine Operator"])
+            with (output_dir / "job_pool.csv").open(
+                "r", encoding="utf-8-sig", newline=""
+            ) as handle:
+                pool = list(csv.DictReader(handle))
+            self.assertEqual([row["title"] for row in pool], ["GIS Data Analyst"])
+
+            second = run_with([relevant, irrelevant])
+            self.assertEqual(second.jobs_analyzed, 0)
+            self.assertEqual(second.jobs_skipped_unchanged, 1)
+
+            changed = self._job(description=self.high_fit_description + "\nTableau required.")
+            third = run_with([changed, irrelevant])
+            self.assertEqual(third.jobs_analyzed, 1)
+            self.assertEqual(third.jobs_changed, 1)
 
 
 if __name__ == "__main__":

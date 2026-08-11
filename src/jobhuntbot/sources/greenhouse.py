@@ -31,6 +31,7 @@ class GreenhouseAdapter:
         batch = SourceBatch()
         try:
             payload = self.client.get_json(url)
+            batch.pages_fetched = 1
         except SourceRequestError as exc:
             batch.errors.append(
                 SourceFailure(
@@ -97,6 +98,7 @@ class GreenhouseAdapter:
                             item.get("employment_type")
                         ),
                         posted_date=normalize_posted_date(item.get("first_published")),
+                        updated_date=normalize_posted_date(item.get("updated_at")),
                         source_url=absolute_url,
                         apply_url=absolute_url,
                         metadata=metadata,

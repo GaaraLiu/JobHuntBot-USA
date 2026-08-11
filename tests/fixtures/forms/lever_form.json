@@ -1,0 +1,20 @@
+{
+  "sections": [
+    {
+      "id": "candidate",
+      "label": "Candidate",
+      "fields": [
+        {"id": "first_name", "label": "Legal first name", "type": "text", "required": true},
+        {"id": "salary", "label": "Expected compensation", "type": "number", "required": true},
+        {"id": "relocate", "label": "Are you willing to relocate?", "type": "radio", "required": false, "options": ["Yes", "No"]}
+      ]
+    },
+    {
+      "id": "legal",
+      "label": "Legal",
+      "fields": [
+        {"id": "attestation", "label": "I certify that the information provided is accurate", "type": "checkbox", "required": true}
+      ]
+    }
+  ]
+}

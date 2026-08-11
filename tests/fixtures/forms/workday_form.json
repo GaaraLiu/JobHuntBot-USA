@@ -1,0 +1,36 @@
+{
+  "applicationForm": {
+    "sections": [
+      {
+        "id": "education_0",
+        "title": "Education",
+        "repeatable": true,
+        "repeatGroup": "education",
+        "repeatIndex": 0,
+        "fields": [
+          {"id": "school", "label": "School", "dataType": "text", "required": true},
+          {"id": "degree", "label": "Degree", "dataType": "text", "required": true},
+          {"id": "graduation", "label": "Graduation date", "dataType": "date", "required": true}
+        ]
+      },
+      {
+        "id": "employment_0",
+        "title": "Employment History",
+        "repeatable": true,
+        "repeatGroup": "employment",
+        "repeatIndex": 0,
+        "fields": [
+          {"id": "company", "label": "Company", "dataType": "text", "required": true},
+          {"id": "job_title", "label": "Job title", "dataType": "text", "required": true}
+        ]
+      },
+      {
+        "id": "signature",
+        "title": "Certification",
+        "fields": [
+          {"id": "signature", "label": "Electronic signature", "dataType": "text", "required": true}
+        ]
+      }
+    ]
+  }
+}

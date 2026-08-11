@@ -1,0 +1,8 @@
+{
+  "questions": [
+    {"label": "Email address", "required": true, "fields": [{"name": "email", "type": "email"}]},
+    {"label": "Are you legally authorized to work in the United States?", "required": true, "fields": [{"name": "authorized", "type": "yes_no"}]},
+    {"label": "Will you now or in the future require sponsorship?", "required": true, "fields": [{"name": "sponsorship", "type": "yes_no"}]},
+    {"label": "Resume", "required": true, "fields": [{"name": "resume", "type": "file"}]}
+  ]
+}

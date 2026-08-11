@@ -1,0 +1,20 @@
+{
+  "formSections": [
+    {
+      "id": "application",
+      "title": "Application",
+      "fieldDefinitions": [
+        {"id": "phone", "label": "Phone number", "fieldType": "phone", "required": true},
+        {"id": "python_years", "label": "How many years of Python experience?", "fieldType": "number", "required": true},
+        {"id": "clearance", "label": "Security clearance level", "fieldType": "single_select", "required": true, "selectOptions": ["None", "Public Trust", "Secret"]}
+      ]
+    },
+    {
+      "id": "eeo",
+      "title": "Voluntary EEO",
+      "fieldDefinitions": [
+        {"id": "gender", "label": "Gender", "fieldType": "single_select", "required": false, "selectOptions": ["Prefer not to answer"]}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "sections": [
+    {
+      "id": "address",
+      "label": "Current Address",
+      "questions": [
+        {"id": "street", "label": "Street address", "inputType": "text", "required": true},
+        {"id": "city", "label": "City", "inputType": "text", "required": true},
+        {"id": "state", "label": "State/Province", "inputType": "single_select", "required": true, "answers": ["Example State", "Example Province"]},
+        {"id": "postal", "label": "Postal code", "inputType": "text", "required": true},
+        {"id": "country", "label": "Country", "inputType": "single_select", "required": true, "answers": ["Exampleland"]}
+      ]
+    },
+    {
+      "id": "screening",
+      "label": "Screening",
+      "questions": [
+        {"id": "license", "label": "Do you possess a valid driver's license?", "inputType": "yes_no", "required": true}
+      ]
+    }
+  ]
+}

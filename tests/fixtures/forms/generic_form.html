@@ -1,0 +1,22 @@
+<!doctype html>
+<html><body>
+  <form>
+    <fieldset id="contact"><legend>Contact Information</legend>
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email" required>
+      <label for="phone">Phone number</label>
+      <input id="phone" name="phone" type="tel">
+      <label for="country">Country</label>
+      <select id="country" name="country" required>
+        <option value="exampleland">Exampleland</option>
+        <option value="sample-republic">Sample Republic</option>
+      </select>
+    </fieldset>
+    <fieldset id="screening"><legend>Screening</legend>
+      <label><input name="relocate" type="radio" value="yes" required>Yes, willing to relocate</label>
+      <label><input name="relocate" type="radio" value="no">No, not willing to relocate</label>
+      <label for="resume">Resume</label>
+      <input id="resume" name="resume" type="file" required accept=".pdf">
+    </fieldset>
+  </form>
+</body></html>

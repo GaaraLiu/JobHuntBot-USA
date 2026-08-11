@@ -22,6 +22,17 @@ from .application_queue import (
     load_pipeline_candidates,
     load_questions,
 )
+from .application_forms import (
+    ApplicationFormMapper,
+    FormContext,
+    SUPPORTED_APPLICATION_ATS,
+    create_form_adapter,
+    detect_application_ats,
+)
+from .application_forms.mapping import (
+    load_application_form,
+    save_private_json,
+)
 from .aggregators import (
     AGGREGATOR_SOURCES,
     AggregatorConfigError,
@@ -231,6 +242,37 @@ def _build_parser() -> argparse.ArgumentParser:
     unresolved.add_argument("--questions", required=True, type=Path)
     unresolved.add_argument("--job", type=Path)
     unresolved.add_argument("--json", action="store_true", dest="as_json")
+
+    inspect_form = subparsers.add_parser(
+        "application-form-inspect",
+        help="Read saved/public form structure and emit a canonical form without filling it.",
+    )
+    inspect_form.add_argument("--input", required=True, type=Path)
+    inspect_form.add_argument("--application-url", default="")
+    inspect_form.add_argument(
+        "--ats", choices=("auto", "unknown", *SUPPORTED_APPLICATION_ATS), default="auto"
+    )
+    inspect_form.add_argument("--known-source", default="")
+    inspect_form.add_argument("--source", default="saved_file")
+    inspect_form.add_argument("--job-id", default="")
+    inspect_form.add_argument("--company", default="")
+    inspect_form.add_argument("--title", default="")
+    inspect_form.add_argument("--form-version", default="")
+    inspect_form.add_argument("--output", type=Path)
+    inspect_form.add_argument("--json", action="store_true", dest="as_json")
+
+    map_form = subparsers.add_parser(
+        "application-form-map",
+        help="Build a private read-only mapping plan for a canonical application form.",
+    )
+    map_form.add_argument("--form", required=True, type=Path)
+    map_form.add_argument("--application-profile", required=True, type=Path)
+    map_form.add_argument("--answer-bank", required=True, type=Path)
+    map_form.add_argument("--application-package", type=Path)
+    map_form.add_argument("--job-result", type=Path)
+    map_form.add_argument("--application-id", default="")
+    map_form.add_argument("--output", type=Path)
+    map_form.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -438,6 +480,82 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "application-form-inspect":
+            ats = (
+                detect_application_ats(args.application_url, args.known_source)
+                if args.ats == "auto"
+                else args.ats
+            )
+            context = FormContext(
+                source=args.source,
+                ats=ats,
+                application_url=args.application_url,
+                job_id=args.job_id,
+                company=args.company,
+                title=args.title,
+                form_version=args.form_version,
+                metadata={"read_only": True, "input_path": str(args.input)},
+            )
+            adapter = create_form_adapter(ats)
+            if args.input.suffix.casefold() == ".json":
+                payload = json.loads(args.input.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("Application form metadata root must be an object.")
+                form = adapter.parse_json(payload, context)
+            else:
+                form = adapter.parse_html(args.input.read_text(encoding="utf-8"), context)
+            value = form.to_dict()
+            if args.output:
+                save_private_json(args.output, value)
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"ATS: {form.ats}")
+                print(f"Detection: {form.detection_status}")
+                print(f"Fields: {len(form.fields)}")
+                print(f"Fingerprint: {form.fingerprint}")
+            return 0
+
+        if args.command == "application-form-map":
+            form = load_application_form(args.form)
+            profile = load_application_profile(args.application_profile)
+            bank = load_answer_bank(args.answer_bank)
+            job: dict = {}
+            selected_resume: dict = {}
+            application_id = args.application_id
+            if args.application_package:
+                package = json.loads(args.application_package.read_text(encoding="utf-8"))
+                if not isinstance(package, dict):
+                    raise ValueError("Application package root must be an object.")
+                job = dict(package.get("job_snapshot", {}))
+                selected_resume = dict(package.get("selected_resume", {}))
+                application_id = application_id or str(package.get("application_id", ""))
+            if args.job_result:
+                result = json.loads(args.job_result.read_text(encoding="utf-8"))
+                if not isinstance(result, dict):
+                    raise ValueError("Job result root must be an object.")
+                job = dict(result.get("job", result))
+                selected_resume = dict(result.get("resume", selected_resume))
+            plan = ApplicationFormMapper(profile, bank).build_plan(
+                form,
+                application_id=application_id,
+                job=job,
+                selected_resume=selected_resume,
+            )
+            value = plan.to_dict()
+            if args.output:
+                save_private_json(args.output, value)
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Form mapping: {form.ats} / {form.fingerprint}")
+                print(f"Fields: {plan.total_fields}; mapped: {plan.mapped_fields}")
+                print(f"Required unresolved: {plan.required_unresolved}")
+                print(f"Manual only: {plan.manual_only}")
+                print(f"Future autofill eligible: {plan.potential_future_autofill}")
+                print(f"Readiness: {plan.package_readiness}")
+            return 0
+
         if args.command == "application-queue-import":
             candidates = load_pipeline_candidates(args.input)
             report = ApplicationQueueStore(args.queue).import_candidates(
@@ -684,6 +802,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         AnswerBankError,
         ApplicationProfileError,
         ApplicationQueueError,
+        OSError,
+        ValueError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

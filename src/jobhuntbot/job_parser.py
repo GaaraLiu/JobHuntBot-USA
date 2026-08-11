@@ -7,7 +7,7 @@ from datetime import date
 from typing import Protocol
 
 from .config import AppConfig
-from .models import ExperienceRequirement, NormalizedJob, RawJob, SalaryRange
+from .models import ExperienceRequirement, NormalizedJob, RawJob, SalaryRange, Seniority
 from .normalization import (
     build_job_id,
     canonicalize_url,
@@ -166,6 +166,23 @@ _COLLABORATION_CONTEXT_RE = re.compile(
 )
 
 
+_SENIORITY_PATTERNS = (
+    ("executive", ("executive",)),
+    ("vp", ("vice president", "vp")),
+    ("director", ("director",)),
+    ("principal", ("principal",)),
+    ("staff", ("staff",)),
+    ("lead", ("lead",)),
+    ("manager", ("manager",)),
+    ("senior", ("senior", "sr")),
+    ("mid", ("mid",)),
+    ("associate", ("associate",)),
+    ("junior", ("junior",)),
+    ("entry", ("entry",)),
+    ("intern", ("intern",)),
+)
+
+
 def _salary_number(value: str | None) -> float | None:
     if not value:
         return None
@@ -270,6 +287,7 @@ class DeterministicJobParser:
 
         salary = self._parse_salary(description, evidence)
         experience = self._parse_experience(description, evidence)
+        seniority = self._parse_seniority(raw_job.title, evidence)
         education = self._parse_education(description, evidence)
         required_skills, preferred_skills = self._parse_skills(description, evidence)
         employment_type = self._parse_employment_type(description, evidence)
@@ -305,6 +323,7 @@ class DeterministicJobParser:
             salary=salary,
             employment_type=employment_type,
             experience_required=experience,
+            seniority=seniority,
             education_required=education,
             skills_required=required_skills,
             preferred_skills=preferred_skills,
@@ -319,6 +338,14 @@ class DeterministicJobParser:
             work_authorization_requirements=authorization,
             parser_evidence=evidence,
         )
+
+    def _parse_seniority(self, title: str, evidence: dict[str, list[str]]) -> Seniority | None:
+        for level, signals in _SENIORITY_PATTERNS:
+            if any(_contains_phrase(title, signal) for signal in signals):
+                source = normalize_space(title)
+                evidence["seniority"] = [source]
+                return Seniority(level=level, evidence=source)
+        return None
 
     def _parse_salary(self, text: str, evidence: dict[str, list[str]]) -> SalaryRange | None:
         match = _SALARY_RE.search(text)

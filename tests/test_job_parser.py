@@ -222,6 +222,42 @@ Benefits
 
         self.assertEqual(job.industries, [])
 
+    def test_recognizes_explicit_title_seniority_signals(self) -> None:
+        cases = [
+            ("Software Engineering Intern", "intern"),
+            ("Entry-Level Data Analyst", "entry"),
+            ("Junior Data Analyst", "junior"),
+            ("Associate Data Analyst", "associate"),
+            ("Mid-Level Data Analyst", "mid"),
+            ("Senior Data Analyst", "senior"),
+            ("Sr Machine Learning Engineer - Ads Personalization", "senior"),
+            ("Lead Data Scientist", "lead"),
+            ("Staff Machine Learning Engineer", "staff"),
+            ("Principal Data Scientist", "principal"),
+            ("Analytics Manager", "manager"),
+            ("Director of Analytics", "director"),
+            ("VP of Data", "vp"),
+            ("Vice President of Analytics", "vp"),
+            ("Executive Data Leader", "executive"),
+        ]
+
+        for title, expected_level in cases:
+            with self.subTest(title=title):
+                job = self.parse_description("Requirements\n- 2 years experience.", title=title)
+                self.assertIsNotNone(job.seniority)
+                self.assertEqual(job.seniority.level, expected_level)
+                self.assertEqual(job.seniority.evidence, title)
+                self.assertEqual(job.parser_evidence["seniority"], [title])
+                self.assertEqual(job.to_dict()["seniority"]["level"], expected_level)
+
+    def test_title_without_explicit_seniority_remains_unspecified(self) -> None:
+        job = self.parse_description(
+            "Requirements\n- 5+ years of experience.",
+            title="Machine Learning Engineer",
+        )
+
+        self.assertIsNone(job.seniority)
+        self.assertNotIn("seniority", job.parser_evidence)
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,14 @@ import re
 from dataclasses import dataclass, field
 
 from .config import AppConfig
-from .models import CandidateProfile, NormalizedJob, Recommendation, ScoreComponent, ScoreResult
+from .models import (
+    CandidateProfile,
+    NormalizedJob,
+    Recommendation,
+    ScoreComponent,
+    ScoreResult,
+    SeniorityExperienceRisk,
+)
 from .normalization import normalize_skill, normalize_skills, normalize_text_key
 
 
@@ -18,6 +25,18 @@ _EDUCATION_RANKS = {
     "mba": 4,
     "phd": 5,
     "doctorate": 5,
+}
+
+
+_SENIOR_OR_HIGHER = {
+    "senior",
+    "lead",
+    "staff",
+    "principal",
+    "manager",
+    "director",
+    "vp",
+    "executive",
 }
 
 
@@ -61,6 +80,7 @@ class JobFitScorer:
         blockers, blocker_unknowns, blocker_matches = self._hard_requirements(profile, job)
         context.unknown.extend(blocker_unknowns)
         context.matched.extend(blocker_matches)
+        seniority_risk = self._seniority_experience_risk(profile, job)
 
         assessed = [item for item in components if item.awarded_points is not None]
         assessed_max = sum(item.maximum_points for item in assessed)
@@ -84,6 +104,10 @@ class JobFitScorer:
         else:
             recommendation = Recommendation.SKIP
 
+        threshold_recommendation = recommendation
+        if seniority_risk.triggered and recommendation == Recommendation.APPLY:
+            recommendation = Recommendation.REVIEW
+
         reasoning = [
             f"Evidence-backed fit score {overall:.1f}/100 with {coverage:.0%} scoring coverage.",
             (
@@ -98,7 +122,21 @@ class JobFitScorer:
         elif coverage < thresholds.minimum_apply_coverage and overall >= thresholds.apply_min:
             reasoning.append("Evidence coverage is below the configured APPLY minimum, so human review is required.")
         else:
-            reasoning.append(f"The evidence and configured thresholds produce {recommendation.value}.")
+            reasoning.append(
+                f"The evidence and configured thresholds produce {threshold_recommendation.value}."
+            )
+        if seniority_risk.triggered:
+            if threshold_recommendation == Recommendation.APPLY:
+                reasoning.append(
+                    "The seniority/experience safeguard caps APPLY at REVIEW because the "
+                    "role explicitly signals senior-or-higher seniority, requires at least "
+                    "5 years of experience, and the candidate does not demonstrate that level."
+                )
+            else:
+                reasoning.append(
+                    "The seniority/experience safeguard is triggered; the existing "
+                    f"{recommendation.value} decision remains unchanged."
+                )
 
         return ScoreResult(
             overall_score=overall,
@@ -110,6 +148,58 @@ class JobFitScorer:
             unknown_requirements=list(dict.fromkeys(context.unknown)),
             hard_blockers=list(dict.fromkeys(blockers)),
             reasoning=reasoning,
+            seniority_experience_risk=seniority_risk,
+        )
+
+    def _seniority_experience_risk(
+        self,
+        profile: CandidateProfile,
+        job: NormalizedJob,
+    ) -> SeniorityExperienceRisk:
+        seniority = job.seniority
+        requirement = job.experience_required
+        if seniority is None or seniority.level not in _SENIOR_OR_HIGHER:
+            return SeniorityExperienceRisk(
+                reason="No explicit senior-or-higher job seniority was detected."
+            )
+        if requirement is None or requirement.minimum_years is None or requirement.minimum_years < 5:
+            return SeniorityExperienceRisk(
+                reason="The job does not state a minimum experience requirement of at least 5 years.",
+                evidence=[f"Seniority: {seniority.level} ({seniority.evidence})"],
+            )
+
+        required = requirement.minimum_years
+        minimum_evidence = requirement.raw_text or f"{required:g} years"
+        evidence = [
+            f"Seniority: {seniority.level} ({seniority.evidence})",
+            f"Minimum experience: {minimum_evidence}",
+        ]
+        actual = profile.years_of_experience
+        if actual is None:
+            evidence.append("Candidate years of experience: UNKNOWN")
+            return SeniorityExperienceRisk(
+                triggered=True,
+                reason=(
+                    f"Role explicitly signals {seniority.level} seniority and requires at least "
+                    f"{required:g} years of experience, while candidate experience is UNKNOWN "
+                    "and not evidenced at that level."
+                ),
+                evidence=evidence,
+            )
+        if actual < required:
+            evidence.append(f"Candidate years of experience: {actual:g}")
+            return SeniorityExperienceRisk(
+                triggered=True,
+                reason=(
+                    f"Role explicitly signals {seniority.level} seniority and requires at least "
+                    f"{required:g} years of experience, while the candidate reports {actual:g} years."
+                ),
+                evidence=evidence,
+            )
+        evidence.append(f"Candidate years of experience: {actual:g}")
+        return SeniorityExperienceRisk(
+            reason="Candidate-reported experience meets the explicit minimum for this senior role.",
+            evidence=evidence,
         )
 
     def _component(

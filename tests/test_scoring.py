@@ -36,6 +36,115 @@ class ScoringTests(unittest.TestCase):
         self.config = load_config()
         self.scorer = JobFitScorer(self.config)
 
+    def score_strong_match_with_unknown_experience(self, *, title: str, requirement: str):
+        self.profile.years_of_experience = None
+        self.profile.preferred_roles = ["Machine Learning Engineer", "Data Analyst"]
+        self.profile.secondary_roles = []
+        self.profile.skills = [
+            "Python",
+            "SQL",
+            "Excel",
+            "Power BI",
+            "TensorFlow",
+            "PyTorch",
+            "GCP",
+        ]
+        self.profile.preferred_locations = ["Boston, MA"]
+        self.profile.remote_preferences = ["remote"]
+        self.profile.minimum_salary = 80000
+        self.profile.industries = ["technology"]
+        parser = DeterministicJobParser(self.config)
+        job = parser.parse(
+            RawJob(
+                title=title,
+                company="Synthetic Technology Employer",
+                location="Boston, MA",
+                source="manual",
+                discovered_date="2026-08-10",
+                job_description=(
+                    "Technology company.\n"
+                    "Full-time\n"
+                    "Remote\n"
+                    "Requirements\n"
+                    "- Bachelor's degree in computer science.\n"
+                    f"- {requirement} of relevant experience.\n"
+                    "- Python, SQL, Excel, Power BI, TensorFlow, PyTorch, and GCP.\n"
+                    "Salary: $100,000 - $120,000 per year.\n"
+                ),
+            )
+        )
+        return job, self.scorer.score(self.profile, job)
+
+    def test_early_career_unknown_experience_cannot_auto_apply_to_senior_mle(self) -> None:
+        job, result = self.score_strong_match_with_unknown_experience(
+            title="Senior Machine Learning Engineer",
+            requirement="5+ years",
+        )
+
+        experience = next(item for item in result.components if item.component == "experience")
+        self.assertEqual(job.seniority.level, "senior")
+        self.assertEqual(job.experience_required.minimum_years, 5)
+        self.assertEqual(experience.status, "unknown")
+        self.assertIsNone(experience.awarded_points)
+        self.assertGreaterEqual(result.overall_score, self.config.thresholds.apply_min)
+        self.assertTrue(result.seniority_experience_risk.triggered)
+        self.assertTrue(result.to_dict()["seniority_experience_risk"]["triggered"])
+        self.assertEqual(result.recommendation, Recommendation.REVIEW)
+
+    def test_strong_skill_match_does_not_override_senior_five_year_risk(self) -> None:
+        _, result = self.score_strong_match_with_unknown_experience(
+            title="Senior Data Analyst",
+            requirement="5+ years",
+        )
+
+        self.assertTrue(result.seniority_experience_risk.triggered)
+        self.assertNotEqual(result.recommendation, Recommendation.APPLY)
+        self.assertIn("caps APPLY at REVIEW", " ".join(result.reasoning))
+
+    def test_ordinary_job_preserves_unknown_experience_behavior(self) -> None:
+        job, result = self.score_strong_match_with_unknown_experience(
+            title="Data Analyst",
+            requirement="1-3 years",
+        )
+
+        experience = next(item for item in result.components if item.component == "experience")
+        self.assertIsNone(job.seniority)
+        self.assertEqual(experience.status, "unknown")
+        self.assertIsNone(experience.awarded_points)
+        self.assertFalse(result.seniority_experience_risk.triggered)
+        self.assertEqual(result.recommendation, Recommendation.APPLY)
+
+    def test_senior_title_with_two_year_requirement_does_not_trigger_safeguard(self) -> None:
+        job, result = self.score_strong_match_with_unknown_experience(
+            title="Senior Analyst",
+            requirement="2 years",
+        )
+
+        self.assertEqual(job.seniority.level, "senior")
+        self.assertFalse(result.seniority_experience_risk.triggered)
+        self.assertNotEqual(result.recommendation, Recommendation.SKIP)
+
+    def test_staff_seven_year_role_triggers_advanced_seniority_safeguard(self) -> None:
+        job, result = self.score_strong_match_with_unknown_experience(
+            title="Staff Machine Learning Engineer",
+            requirement="7+ years",
+        )
+
+        self.assertEqual(job.seniority.level, "staff")
+        self.assertTrue(result.seniority_experience_risk.triggered)
+        self.assertNotEqual(result.recommendation, Recommendation.APPLY)
+
+    def test_five_year_requirement_without_explicit_seniority_does_not_trigger_safeguard(self) -> None:
+        job, result = self.score_strong_match_with_unknown_experience(
+            title="Machine Learning Engineer",
+            requirement="5+ years",
+        )
+
+        experience = next(item for item in result.components if item.component == "experience")
+        self.assertIsNone(job.seniority)
+        self.assertEqual(experience.status, "unknown")
+        self.assertFalse(result.seniority_experience_risk.triggered)
+        self.assertEqual(result.recommendation, Recommendation.APPLY)
     def test_high_fit_job_is_apply_with_explainable_components(self) -> None:
         job = parsed_job("job_high_fit.txt", title="GIS Data Analyst", location="Boston, MA")
         result = self.scorer.score(self.profile, job)

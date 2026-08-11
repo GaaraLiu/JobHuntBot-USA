@@ -46,6 +46,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Missing requirements:", text)
         self.assertIn("Unknown requirements:", text)
         self.assertIn("Hard blockers:", text)
+        self.assertIn("Seniority/experience risk:", text)
         self.assertIn("Resume recommendation:", text)
 
 

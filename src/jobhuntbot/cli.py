@@ -79,6 +79,8 @@ def _print_pipeline_result(result: PipelineResult, as_json: bool) -> None:
     print(f"Job ID: {job.job_id}")
     print(f"Recommendation: {score.recommendation.value}")
     print(f"Fit score: {score.overall_score:.1f}/100 (evidence coverage {score.coverage:.0%})")
+    if job.seniority is not None:
+        print(f"Seniority: {job.seniority.level} ({job.seniority.evidence})")
     print("\nScore breakdown:")
     for component in score.components:
         awarded = "unknown" if component.awarded_points is None else f"{component.awarded_points:.1f}"
@@ -90,6 +92,12 @@ def _print_pipeline_result(result: PipelineResult, as_json: bool) -> None:
     _print_items("Missing requirements", score.missing_requirements)
     _print_items("Unknown requirements", score.unknown_requirements)
     _print_items("Hard blockers", score.hard_blockers)
+    risk = score.seniority_experience_risk
+    print("\nSeniority/experience risk:")
+    print(f"  Triggered: {'yes' if risk.triggered else 'no'}")
+    print(f"  Reason: {risk.reason}")
+    if risk.evidence:
+        print(f"  Evidence: {'; '.join(risk.evidence)}")
     print("\nResume recommendation:")
     if resume.selected:
         print(f"  {resume.resume_id}: {resume.file_path}")

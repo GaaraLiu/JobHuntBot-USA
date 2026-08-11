@@ -160,6 +160,12 @@ class ExperienceRequirement:
 
 
 @dataclass(slots=True)
+class Seniority:
+    level: str = ""
+    evidence: str = ""
+
+
+@dataclass(slots=True)
 class RawJob:
     title: str
     company: str
@@ -187,6 +193,7 @@ class NormalizedJob:
     salary: SalaryRange | None = None
     employment_type: str = ""
     experience_required: ExperienceRequirement | None = None
+    seniority: Seniority | None = None
     education_required: list[str] = field(default_factory=list)
     skills_required: list[str] = field(default_factory=list)
     preferred_skills: list[str] = field(default_factory=list)
@@ -219,6 +226,13 @@ class ScoreComponent:
 
 
 @dataclass(slots=True)
+class SeniorityExperienceRisk:
+    triggered: bool = False
+    reason: str = ""
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ScoreResult:
     overall_score: float
     coverage: float
@@ -229,6 +243,9 @@ class ScoreResult:
     unknown_requirements: list[str] = field(default_factory=list)
     hard_blockers: list[str] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
+    seniority_experience_risk: SeniorityExperienceRisk = field(
+        default_factory=SeniorityExperienceRisk
+    )
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)

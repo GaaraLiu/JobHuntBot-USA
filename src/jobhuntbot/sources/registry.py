@@ -9,6 +9,7 @@ from .base import JsonHttpClient, SourceAdapter, SourceConfigurationError
 from .greenhouse import GreenhouseAdapter
 from .lever import LeverAdapter
 from .smartrecruiters import SmartRecruitersAdapter
+from .workday import WorkdayAdapter
 
 
 AdapterFactory = Callable[[JsonHttpClient], SourceAdapter]
@@ -18,6 +19,7 @@ _ADAPTERS: dict[str, AdapterFactory] = {
     "greenhouse": GreenhouseAdapter,
     "lever": LeverAdapter,
     "ashby": AshbyAdapter,
+    "workday": WorkdayAdapter,
 }
 
 

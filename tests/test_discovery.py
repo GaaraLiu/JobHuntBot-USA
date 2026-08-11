@@ -20,6 +20,7 @@ from jobhuntbot.profile import load_candidate_profile
 from jobhuntbot.resume_router import ResumeRouter, load_resume_routing
 from jobhuntbot.relevance import CareerTrack, RelevancePolicy
 from jobhuntbot.sources import DiscoveryTarget, SourceBatch, SourceJob, SourceSalary
+from jobhuntbot.sources.workday import WorkdayAdapter
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -37,6 +38,51 @@ class FixedAdapter:
 class FailingAdapter:
     def fetch(self, target, *, limit=None) -> SourceBatch:
         raise RuntimeError("controlled adapter failure")
+
+
+class WorkdayIntegrationClient:
+    def post_json(self, url, payload, *, headers=None):
+        return {
+            "total": 2,
+            "jobPostings": [
+                {
+                    "title": "Data Reporting Analyst",
+                    "externalPath": "/job/New-York-NY/Data-Reporting-Analyst_EX1001",
+                    "locationsText": "New York, NY",
+                },
+                {
+                    "title": "Laboratory Technician",
+                    "externalPath": "/job/New-York-NY/Laboratory-Technician_EX1002",
+                    "locationsText": "New York, NY",
+                },
+            ],
+        }
+
+    def get_json(self, url, *, headers=None):
+        if url.endswith("EX1001"):
+            return {
+                "jobPostingInfo": {
+                    "title": "Data Reporting Analyst",
+                    "jobReqId": "EX1001",
+                    "jobDescription": (
+                        "Build Power BI dashboards and write SQL queries. "
+                        "Bachelor's degree required."
+                    ),
+                    "location": "New York, NY",
+                    "countryCode": "US",
+                    "timeType": "Full time",
+                }
+            }
+        return {
+            "jobPostingInfo": {
+                "title": "Laboratory Technician",
+                "jobReqId": "EX1002",
+                "jobDescription": "Prepare chemical samples and maintain laboratory equipment.",
+                "location": "New York, NY",
+                "countryCode": "US",
+                "timeType": "Full time",
+            }
+        }
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -111,9 +157,34 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "discovery.json"
             path.write_text(
-                json.dumps({"targets": [{"source": "workday", "board": "x"}]}),
+                json.dumps({"targets": [{"source": "indeed", "board": "x"}]}),
                 encoding="utf-8",
             )
+            with self.assertRaises(DiscoveryConfigError):
+                load_discovery_config(path)
+
+    def test_config_validates_workday_identifiers_without_board_alias(self) -> None:
+        value = {
+            "targets": [
+                {
+                    "source": "workday",
+                    "company": "Example",
+                    "base_url": "https://example.wd1.myworkdayjobs.com",
+                    "tenant": "example",
+                    "career_site": "ExampleCareers",
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "discovery.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            config = load_discovery_config(path)
+        self.assertEqual(config.targets[0].board, "example")
+
+        del value["targets"][0]["career_site"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "discovery.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaises(DiscoveryConfigError):
                 load_discovery_config(path)
 
@@ -149,18 +220,82 @@ class DiscoveryTests(unittest.TestCase):
             return FailingAdapter() if source == "ashby" else FixedAdapter(jobs)
 
         with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "my-materials" / "discovery"
             summary = DiscoveryRunner(
                 profile=self.profile,
                 app_config=self.app_config,
                 resume_router=self.router,
                 discovery_config=config,
-                output_dir=Path(temp_dir) / "my-materials" / "discovery",
+                output_dir=output_dir,
                 adapter_factory=factory,
             ).run()
+            health = json.loads(
+                (output_dir / "health" / "employer_health.json").read_text(
+                    encoding="utf-8"
+                )
+            )
         self.assertEqual(summary.targets_attempted, 2)
         self.assertEqual(len(summary.source_errors), 1)
         self.assertEqual(len(summary.analysis_errors), 1)
         self.assertEqual(summary.jobs_analyzed, 1)
+        self.assertEqual(health["employers"]["ashby:bad"]["status"], "temporarily_failed")
+        self.assertEqual(health["employers"]["greenhouse:good"]["status"], "healthy")
+
+    def test_workday_flows_through_relevance_phase1_and_private_outputs(self) -> None:
+        target = DiscoveryTarget(
+            source="workday",
+            board="example",
+            company="Example University",
+            job_families=["data_bi"],
+            max_results=2,
+            options={
+                "base_url": "https://example.wd1.myworkdayjobs.com",
+                "tenant": "example",
+                "career_site": "ExampleCareers",
+            },
+        )
+        config = DiscoveryConfig(
+            targets=[target],
+            career_tracks={
+                "data_bi": CareerTrack(
+                    name="data_bi",
+                    title_terms=["data reporting analyst"],
+                    description_terms=["power bi", "sql"],
+                )
+            },
+            relevance_policy=RelevancePolicy(enabled=True),
+        )
+        dashboard = Path("dashboard/job_pool.csv")
+        dashboard_before = dashboard.read_bytes()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "my-materials" / "discovery"
+            summary = DiscoveryRunner(
+                profile=self.profile,
+                app_config=self.app_config,
+                resume_router=self.router,
+                discovery_config=config,
+                output_dir=output_dir,
+                client=WorkdayIntegrationClient(),
+                adapter_factory=lambda source, client: WorkdayAdapter(client),
+            ).run()
+            recommended = json.loads(
+                (output_dir / "recommended" / "current_queue.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            irrelevant = json.loads(
+                (output_dir / "irrelevant" / "current_queue.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        self.assertEqual(summary.jobs_fetched, 2)
+        self.assertEqual(summary.jobs_relevant, 1)
+        self.assertEqual(summary.jobs_irrelevant, 1)
+        self.assertEqual(summary.jobs_analyzed, 1)
+        self.assertEqual(recommended[0]["source"], "workday")
+        self.assertEqual(recommended[0]["title"], "Data Reporting Analyst")
+        self.assertEqual(irrelevant[0]["title"], "Laboratory Technician")
+        self.assertEqual(dashboard.read_bytes(), dashboard_before)
 
     def test_full_pipeline_writes_only_requested_private_output(self) -> None:
         config = DiscoveryConfig(

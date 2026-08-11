@@ -137,7 +137,12 @@ class DiscoveryTarget:
             "posted_within_days",
         }
         source = str(value.get("source", "")).strip().casefold()
-        board = str(value.get("board", value.get("company_identifier", ""))).strip()
+        board = str(
+            value.get(
+                "board",
+                value.get("company_identifier", value.get("tenant", "")),
+            )
+        ).strip()
         if not source:
             raise SourceConfigurationError("Discovery target requires source.")
         if not board:
@@ -169,6 +174,15 @@ class JsonHttpClient(Protocol):
     def get_json(
         self,
         url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> Any:
+        ...
+
+    def post_json(
+        self,
+        url: str,
+        payload: Mapping[str, Any],
         *,
         headers: Mapping[str, str] | None = None,
     ) -> Any:
@@ -218,15 +232,37 @@ class PoliteJsonClient:
         *,
         headers: Mapping[str, str] | None = None,
     ) -> Any:
+        return self._request_json(url, method="GET", headers=headers)
+
+    def post_json(
+        self,
+        url: str,
+        payload: Mapping[str, Any],
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> Any:
+        body = json.dumps(dict(payload), ensure_ascii=False).encode("utf-8")
+        return self._request_json(url, method="POST", headers=headers, body=body)
+
+    def _request_json(
+        self,
+        url: str,
+        *,
+        method: str,
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
+    ) -> Any:
         request_headers = {
             "Accept": "application/json",
             "User-Agent": self.user_agent,
         }
+        if body is not None:
+            request_headers["Content-Type"] = "application/json"
         request_headers.update(dict(headers or {}))
         last_reason = ""
         for attempt in range(self.retries + 1):
             self._pace()
-            request = Request(url, headers=request_headers, method="GET")
+            request = Request(url, data=body, headers=request_headers, method=method)
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
                     payload = response.read()

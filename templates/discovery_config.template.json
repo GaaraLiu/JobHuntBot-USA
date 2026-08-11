@@ -175,6 +175,21 @@
       "employment_types": ["full-time"],
       "max_pages": 1,
       "max_results": 10
+    },
+    {
+      "source": "workday",
+      "base_url": "https://replace.wd1.myworkdayjobs.com",
+      "tenant": "REPLACE_WITH_TENANT",
+      "career_site": "REPLACE_WITH_CAREER_SITE",
+      "company": "",
+      "enabled": false,
+      "job_families": ["data_bi"],
+      "search_keywords": [],
+      "location_filter": [],
+      "employment_types": ["full-time"],
+      "max_pages": 2,
+      "max_results": 10,
+      "page_size": 10
     }
   ]
 }

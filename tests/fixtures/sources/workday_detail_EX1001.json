@@ -1,0 +1,18 @@
+{
+  "jobPostingInfo": {
+    "title": "Data Reporting Analyst",
+    "jobReqId": "EX1001",
+    "jobDescription": "<p>Build Power BI dashboards and use SQL for reporting.</p><p>Bachelor's degree required.</p>",
+    "location": "New York, NY",
+    "country": {"descriptor": "United States of America"},
+    "countryCode": "US",
+    "remoteType": {"descriptor": "Hybrid"},
+    "timeType": "Full time",
+    "workerSubType": "Regular",
+    "postedDate": "2026-08-08",
+    "updatedDate": "2026-08-09",
+    "startDate": "2026-09-01",
+    "externalUrl": "https://example.wd1.myworkdayjobs.com/en-US/ExampleCareers/job/New-York-NY/Data-Reporting-Analyst_EX1001",
+    "additionalLocations": ["Jersey City, NJ"]
+  }
+}

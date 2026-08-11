@@ -1,6 +1,6 @@
 # Phase 2: U.S. job discovery
 
-Phase 2 retrieves public employer postings from supported ATS interfaces, keeps their source evidence, and deterministically removes duplicates. Phase 2.1 applies frozen Phase 1 normalization (including seniority), then adds an explainable relevance gate and private incremental state before scoring and resume routing. It does not automate applications.
+Phase 2 retrieves public employer postings from supported ATS interfaces, keeps their source evidence, and deterministically removes duplicates. Phase 2.1 applies frozen Phase 1 normalization (including seniority), then adds an explainable relevance gate and private incremental state before scoring and resume routing. Phase 2.2 adds bounded Workday CXS retrieval and a private employer registry. It does not automate applications.
 
 ## Supported public sources
 
@@ -8,6 +8,7 @@ Phase 2 retrieves public employer postings from supported ATS interfaces, keeps 
 - Greenhouse Job Board API: `https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs?content=true`
 - Lever Postings API: `https://api.lever.co/v0/postings/{site}?mode=json`
 - Ashby public job board API: `https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=true`
+- Workday public CXS career-site pattern: `{base_url}/wday/cxs/{tenant}/{career_site}/jobs`
 
 Only public, employer-provided listing interfaces are used. The HTTP client has a descriptive User-Agent, a timeout, bounded retries, and configurable polite pacing. It does not bypass authentication, rate limits, CAPTCHAs, or access controls.
 
@@ -19,9 +20,29 @@ The four initial tracks are `higher_education`, `data_bi`, `urban_transport_gis`
 
 `location_policy` is a private discovery gate for `allowed_countries` (U.S.-only by default), primary markets, U.S. remote terms, relocation markets, exclusions, and whether other confirmed U.S. locations remain reviewable. Explicit ATS country metadata takes precedence; otherwise deterministic country/state evidence is used. Known non-U.S. jobs are `international` and excluded unless their country is explicitly allowed. Ambiguous locations remain `unknown`. The tracked template contains no private cities. The optional freshness filter uses a source's explicit updated date, then posted date; a missing or unparseable date remains `UNKNOWN` and is retained.
 
-SmartRecruiters and Lever use bounded server pagination (`offset` and `skip` respectively). Greenhouse and Ashby publish their current job-board collection in one response, so those adapters use one request and apply a client-side result cap. Every target is bounded by `max_pages`, `max_results`, and the global fetch cap.
+SmartRecruiters and Lever use bounded server pagination (`offset` and `skip` respectively). Workday uses bounded POST search pagination (`offset` and `limit`) and then retrieves the public detail endpoint referenced by each `externalPath`. Greenhouse and Ashby publish their current job-board collection in one response, so those adapters use one request and apply a client-side result cap. Every target is bounded by `max_pages`, `max_results`, and the global fetch cap.
 
 The template targets are disabled placeholders. Do not commit real board targets, credentials, candidate data, or discovered postings.
+
+## Workday target configuration
+
+A Workday target requires `source: "workday"`, `base_url`, `tenant`, and `career_site`; `company`, `enabled`, `locale`, `page_size`, `max_pages`, and `max_results` are optional. `base_url` is the HTTPS origin, not a job page. The common public careers URL exposes the career-site name after the locale, while the public CXS requests expose both tenant and career-site identifiers. Verify all three values against the employer's own public careers site. Do not infer a tenant from a company name.
+
+The adapter defaults to the common CXS search and detail paths. Deployments with a different public structured path may set `search_path` and `detail_path_template`; the latter must include `{external_path}`. A login wall, CAPTCHA, access-controlled deployment, unsupported response, or non-CXS site is reported as unsupported/error. The adapter never switches to HTML scraping or browser automation.
+
+## Private employer registry
+
+Copy `templates/employer_registry.template.json` to ignored `my-materials/discovery/employer_registry.json`. Each employer record contains:
+
+- stable lowercase `employer_id`, display `name`, `enabled`, and supported `source`
+- source-specific public identifiers in `ats` (`board` for the original four sources; `base_url`, `tenant`, and `career_site` for Workday)
+- one or more `career_tracks`, non-negative `priority`, optional `geography`, `notes`, and `validation`
+
+Top-level `defaults` supply bounded target settings. `discovery_config` may point to the private Phase 2.1 policy file relative to the registry. Registry career tracks restrict which configured tracks are evaluated for that target; they are hints and cannot make a posting relevant by themselves.
+
+Identify SmartRecruiters's company identifier from its public Posting API URL, Greenhouse's board token from its Job Board API URL, Lever's site name from its public postings URL, and Ashby's board name from its public job-board URL. Keep real employer identifiers only in the ignored registry.
+
+Offline validation checks the schema, unique IDs, supported ATS names, track names (when a discovery configuration is available), required source identifiers, multi-track entries, priority, and Workday endpoint syntax. An endpoint check occurs only when `validate-registry --live` is explicitly used.
 
 ## Normalization precedence
 
@@ -49,6 +70,33 @@ python -m jobhuntbot discover \
 
 Repeat `--source greenhouse` (or another supported source) to limit sources. Add `--limit 10` for a bounded run. Add `--discovery-only` to retrieve, filter, deduplicate, normalize, and evaluate relevance without scoring or resume routing. Add `--reanalyze-unchanged` only when an explicit repeat analysis is needed. Add `--json` for a machine-readable run summary.
 
+Registry-driven discovery reuses the same policy configuration and downstream pipeline:
+
+```bash
+python -m jobhuntbot discover \
+  --profile my-materials/candidate_profile.json \
+  --resume-routing my-materials/resume_routing.json \
+  --scoring-config my-materials/config/jobhuntbot.local.json \
+  --discovery-config my-materials/discovery/discovery_config.json \
+  --employer-registry my-materials/discovery/employer_registry.json \
+  --track data_bi \
+  --source workday \
+  --max-employers 5 \
+  --output-dir my-materials/discovery/phase2.2_smoke
+```
+
+`--track`, `--source`, `--min-priority`, and `--max-employers` select enabled employers deterministically by descending priority and then `employer_id`. Existing direct-config discovery remains supported.
+
+Validate without network access:
+
+```bash
+python -m jobhuntbot validate-registry \
+  --employer-registry my-materials/discovery/employer_registry.json \
+  --discovery-config my-materials/discovery/discovery_config.json
+```
+
+Add `--live` only for an explicit, bounded endpoint check.
+
 When `incremental.enabled` is true, stable `job_id` plus a deterministic content fingerprint drives analysis: new and changed jobs are analyzed, unchanged jobs reuse their private prior result, and a missing prior artifact triggers recovery analysis. The private JSON state records first/last seen, last analyzed, source/native ID, fingerprint, prior decision, resume, and latest relevance result. No database is required.
 
 ## Private outputs
@@ -62,11 +110,12 @@ The default output root is ignored `my-materials/discovery/`:
 - `irrelevant/`: current and per-job exclusions; raw evidence is retained and these jobs do not enter scoring
 - `errors/`: current and per-error source/analysis failures
 - `state/discovery_state.json`: private incremental state
+- `health/employer_health.json`: per-employer `healthy`, `empty`, `temporarily_failed`, `invalid_config`, or `unsupported` status, last check/success/error, and latest job count
 - `discovery_log.jsonl`: source failures, job failures, duplicate reasons, and run summaries
 - `job_pool.csv`: relevant current-run jobs ranked by decision, score, and evidence coverage
 
-All APPLY, REVIEW, and SKIP results are retained. Real discovery never writes `dashboard/job_pool.csv` by default. One source or posting failure is logged without aborting other targets.
+All APPLY, REVIEW, and SKIP results are retained. Real discovery never writes `dashboard/job_pool.csv` by default. One employer, source, or posting failure is logged without aborting other targets. A successfully queried board with zero postings is `empty`, not a failure.
 
 ## Out of scope
 
-This phase contains no LinkedIn, Indeed, Workday, browser automation, authentication bypass, form filling, resume upload, application submission, or auto-submit behavior.
+This phase contains no LinkedIn, Indeed, browser automation, authentication bypass, form filling, resume upload, application submission, or auto-submit behavior. Workday support is limited to explicitly configured public structured CXS patterns; compatibility with every Workday deployment is not claimed.

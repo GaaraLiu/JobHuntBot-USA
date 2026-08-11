@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "discovery_config": "discovery_config.json",
+  "defaults": {
+    "max_pages": 2,
+    "max_results": 10,
+    "posted_within_days": null,
+    "employment_types": ["full-time"]
+  },
+  "employers": [
+    {
+      "employer_id": "replace-workday-employer",
+      "name": "REPLACE WITH EMPLOYER NAME",
+      "enabled": false,
+      "source": "workday",
+      "career_tracks": ["higher_education", "data_bi"],
+      "priority": 50,
+      "geography": ["US"],
+      "notes": "Private registry entry; replace all placeholder identifiers.",
+      "ats": {
+        "base_url": "https://replace.wd1.myworkdayjobs.com",
+        "tenant": "REPLACE_WITH_TENANT",
+        "career_site": "REPLACE_WITH_CAREER_SITE",
+        "locale": "en-US",
+        "page_size": 10
+      },
+      "validation": {
+        "expected_public": true
+      }
+    },
+    {
+      "employer_id": "replace-existing-ats-employer",
+      "name": "REPLACE WITH EMPLOYER NAME",
+      "enabled": false,
+      "source": "greenhouse",
+      "career_tracks": ["urban_transport_gis", "applied_ai"],
+      "priority": 40,
+      "geography": ["US"],
+      "notes": "Use smartrecruiters, greenhouse, lever, or ashby plus its public board identifier.",
+      "ats": {
+        "board": "REPLACE_WITH_PUBLIC_BOARD_IDENTIFIER"
+      }
+    }
+  ]
+}

@@ -84,5 +84,100 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0, errors.getvalue())
         self.assertEqual(value["jobs_fetched"], 0)
         self.assertEqual(value["jobs_analyzed"], 0)
+
+    def test_registry_discovery_generates_targets_without_breaking_direct_mode(self) -> None:
+        output = io.StringIO()
+        errors = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = root / "discovery.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "career_tracks": {
+                            "data_bi": {"title_terms": ["data analyst"]}
+                        },
+                        "relevance_policy": {"enabled": True},
+                        "targets": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            registry = root / "employer_registry.json"
+            registry.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "discovery_config": "discovery.json",
+                        "employers": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            private_output = root / "my-materials" / "discovery"
+            with redirect_stdout(output), redirect_stderr(errors):
+                exit_code = main([
+                    "discover",
+                    "--profile", str(FIXTURES / "profile_valid.json"),
+                    "--resume-routing", str(FIXTURES / "resume_routing_valid.json"),
+                    "--employer-registry", str(registry),
+                    "--track", "data_bi",
+                    "--max-employers", "1",
+                    "--output-dir", str(private_output),
+                    "--json",
+                ])
+            value = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0, errors.getvalue())
+        self.assertEqual(value["targets_attempted"], 0)
+        self.assertTrue(value["health_path"].endswith("employer_health.json"))
+
+    def test_validate_registry_is_offline_by_default(self) -> None:
+        output = io.StringIO()
+        errors = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            registry = root / "employer_registry.json"
+            registry.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "employers": [
+                            {
+                                "employer_id": "example",
+                                "name": "Example",
+                                "enabled": True,
+                                "source": "greenhouse",
+                                "career_tracks": ["data_bi"],
+                                "priority": 1,
+                                "ats": {"board": "example"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with redirect_stdout(output), redirect_stderr(errors):
+                exit_code = main([
+                    "validate-registry",
+                    "--employer-registry", str(registry),
+                    "--json",
+                ])
+            value = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0, errors.getvalue())
+        self.assertTrue(value["valid"])
+        self.assertNotIn("live_checks", value)
+
+    def test_discover_requires_policy_config(self) -> None:
+        output = io.StringIO()
+        errors = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(errors):
+            exit_code = main([
+                "discover",
+                "--profile", str(FIXTURES / "profile_valid.json"),
+                "--resume-routing", str(FIXTURES / "resume_routing_valid.json"),
+            ])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires --discovery-config", errors.getvalue())
 if __name__ == "__main__":
     unittest.main()

@@ -10,11 +10,20 @@ from typing import Sequence
 
 from .config import ConfigError, load_config
 from .discovery import DiscoveryConfigError, DiscoveryRunner, load_discovery_config
+from .employer_registry import (
+    EmployerRegistryError,
+    generate_registry_targets,
+    load_employer_registry,
+    resolve_registry_discovery_config,
+    target_employer_id,
+    target_health_status,
+    validate_employer_registry,
+)
 from .models import PipelineResult, RawJob
 from .pipeline import JobHuntPipeline, PipelineValidationError
 from .profile import ProfileLoadError, load_candidate_profile, validate_candidate_profile
 from .resume_router import ResumeRouter, ResumeRoutingError, load_resume_routing
-from .sources import supported_sources
+from .sources import PoliteJsonClient, SourceFailure, create_adapter, supported_sources
 from .storage import SchemaMismatchError, StorageError
 
 
@@ -52,7 +61,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Discover public ATS jobs, deduplicate, and optionally run Phase 1 analysis.",
     )
     discover.add_argument("--profile", required=True, type=Path)
-    discover.add_argument("--discovery-config", required=True, type=Path)
+    discover.add_argument("--discovery-config", type=Path)
+    discover.add_argument(
+        "--employer-registry",
+        type=Path,
+        help="Private employer registry used to generate discovery targets.",
+    )
     discover.add_argument("--resume-routing", type=Path)
     discover.add_argument("--scoring-config", type=Path)
     discover.add_argument(
@@ -69,6 +83,21 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     discover.add_argument("--limit", type=int, help="Maximum unique jobs for this run.")
     discover.add_argument(
+        "--track",
+        action="append",
+        help="With --employer-registry, select employers serving one or more career tracks.",
+    )
+    discover.add_argument(
+        "--min-priority",
+        type=int,
+        help="With --employer-registry, include employers at or above this priority.",
+    )
+    discover.add_argument(
+        "--max-employers",
+        type=int,
+        help="With --employer-registry, cap generated targets after deterministic sorting.",
+    )
+    discover.add_argument(
         "--discovery-only",
         action="store_true",
         help="Fetch, filter, deduplicate, and normalize without scoring or resume routing.",
@@ -79,6 +108,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Explicitly re-analyze unchanged jobs when incremental discovery is enabled.",
     )
     discover.add_argument("--json", action="store_true", dest="as_json")
+
+    validate_registry = subparsers.add_parser(
+        "validate-registry",
+        help="Validate an employer registry offline, with an optional explicit live check.",
+    )
+    validate_registry.add_argument("--employer-registry", required=True, type=Path)
+    validate_registry.add_argument("--discovery-config", type=Path)
+    validate_registry.add_argument(
+        "--track", action="append", help="Validate/select only registry targets for a track."
+    )
+    validate_registry.add_argument(
+        "--source", action="append", choices=supported_sources()
+    )
+    validate_registry.add_argument("--min-priority", type=int)
+    validate_registry.add_argument("--max-employers", type=int)
+    validate_registry.add_argument(
+        "--live",
+        action="store_true",
+        help="Explicitly make bounded public endpoint checks (never enabled by default).",
+    )
+    validate_registry.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -173,6 +223,25 @@ def _print_discovery_summary(summary, as_json: bool) -> None:
         print(f"Ranked job pool: {summary.job_pool}")
 
 
+def _print_registry_validation(value: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    print(f"Employer registry: {value['registry_path']}")
+    print(f"Valid: {'yes' if value['valid'] else 'no'}")
+    print(f"Employers: {value['employer_count']} ({value['enabled_count']} enabled)")
+    for issue in value.get("issues", []):
+        employer = f" [{issue['employer_id']}]" if issue.get("employer_id") else ""
+        print(f"[{issue['severity'].upper()}]{employer} {issue['field']}: {issue['message']}")
+    for check in value.get("live_checks", []):
+        print(
+            f"[LIVE] {check['employer_id']} ({check['source']}): "
+            f"{check['status']}, jobs={check['jobs_found']}"
+        )
+        if check.get("error"):
+            print(f"  Error: {check['error']}")
+
+
 def _resolve_resume_routing(profile_path: Path, configured: str, explicit: Path | None) -> Path:
     if explicit is not None:
         return explicit
@@ -191,6 +260,64 @@ def _load_analysis_dependencies(profile_path: Path, routing_override: Path | Non
     return profile, config, router
 
 
+def _registry_discovery_config_path(args, registry) -> Path:
+    configured = args.discovery_config or resolve_registry_discovery_config(registry)
+    if configured is None:
+        raise DiscoveryConfigError(
+            "Registry discovery requires --discovery-config or a registry discovery_config path."
+        )
+    return Path(configured)
+
+
+def _registry_targets(args, registry, discovery_config):
+    known_tracks = list(discovery_config.career_tracks or discovery_config.job_families)
+    return generate_registry_targets(
+        registry,
+        known_tracks=known_tracks,
+        tracks=getattr(args, "track", None),
+        sources=getattr(args, "source", None),
+        minimum_priority=getattr(args, "min_priority", None),
+        max_employers=getattr(args, "max_employers", None),
+    )
+
+
+def _live_registry_checks(targets, discovery_config) -> list[dict]:
+    client = PoliteJsonClient(
+        timeout_seconds=discovery_config.request.timeout_seconds,
+        retries=discovery_config.request.retries,
+        min_interval_seconds=discovery_config.request.min_interval_seconds,
+        user_agent=discovery_config.request.user_agent,
+    )
+    checks: list[dict] = []
+    for target in targets:
+        errors: list[SourceFailure] = []
+        jobs_found = 0
+        try:
+            batch = create_adapter(target.source, client).fetch(target, limit=1)
+            errors = batch.errors
+            jobs_found = len(batch.jobs)
+        except Exception as exc:
+            errors = [
+                SourceFailure(
+                    source=target.source,
+                    error_type=type(exc).__name__,
+                    reason=str(exc),
+                )
+            ]
+        status, error = target_health_status(errors, jobs_found)
+        checks.append(
+            {
+                "employer_id": target_employer_id(target),
+                "employer": target.company or target.board,
+                "source": target.source,
+                "status": status,
+                "jobs_found": jobs_found,
+                "error": error,
+            }
+        )
+    return checks
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -205,7 +332,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile, config, router = _load_analysis_dependencies(
                 args.profile, args.resume_routing, args.scoring_config
             )
-            discovery_config = load_discovery_config(args.discovery_config)
+            if args.employer_registry is not None:
+                registry = load_employer_registry(args.employer_registry)
+                discovery_config = load_discovery_config(
+                    _registry_discovery_config_path(args, registry)
+                )
+                discovery_config.targets = _registry_targets(
+                    args, registry, discovery_config
+                )
+            else:
+                if args.discovery_config is None:
+                    raise DiscoveryConfigError(
+                        "discover requires --discovery-config, with optional --employer-registry."
+                    )
+                if args.track or args.min_priority is not None or args.max_employers is not None:
+                    raise DiscoveryConfigError(
+                        "--track, --min-priority, and --max-employers require --employer-registry."
+                    )
+                discovery_config = load_discovery_config(args.discovery_config)
             runner = DiscoveryRunner(
                 profile=profile,
                 app_config=config,
@@ -221,6 +365,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _print_discovery_summary(summary, args.as_json)
             return 0
+
+        if args.command == "validate-registry":
+            registry = load_employer_registry(args.employer_registry)
+            discovery_path = args.discovery_config or resolve_registry_discovery_config(registry)
+            discovery_config = (
+                load_discovery_config(discovery_path) if discovery_path is not None else None
+            )
+            known_tracks = (
+                list(discovery_config.career_tracks or discovery_config.job_families)
+                if discovery_config is not None
+                else None
+            )
+            report = validate_employer_registry(registry, known_tracks=known_tracks)
+            value = report.to_dict()
+            if args.live and report.valid:
+                if discovery_config is None:
+                    raise DiscoveryConfigError(
+                        "--live registry validation requires a discovery configuration."
+                    )
+                targets = _registry_targets(args, registry, discovery_config)
+                value["live_checks"] = _live_registry_checks(targets, discovery_config)
+                if any(
+                    item["status"] in {"temporarily_failed", "invalid_config", "unsupported"}
+                    for item in value["live_checks"]
+                ):
+                    value["valid"] = False
+            _print_registry_validation(value, args.as_json)
+            return 0 if value["valid"] else 1
 
         profile, config, router = _load_analysis_dependencies(
             args.profile, args.resume_routing, args.config
@@ -248,6 +420,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         ConfigError,
         DiscoveryConfigError,
+        EmployerRegistryError,
         ProfileLoadError,
         ResumeRoutingError,
         PipelineValidationError,

@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Data Reporting Analyst",
+      "externalPath": "/job/New-York-NY/Data-Reporting-Analyst_EX1001",
+      "locationsText": "New York, NY",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["New York, NY", "Full time"]
+    },
+    {
+      "title": "Applied AI Analyst",
+      "externalPath": "/job/Remote-US/Applied-AI-Analyst_EX1002",
+      "locationsText": "Remote - US",
+      "postedOn": "Posted Today",
+      "bulletFields": []
+    }
+  ]
+}

@@ -13,6 +13,11 @@ from typing import Any, Callable, Mapping, Sequence
 from .config import AppConfig
 from .deduplication import DuplicateRecord, deduplicate_jobs
 from .discovery_state import DiscoveryStateStore, content_fingerprint
+from .employer_registry import (
+    EmployerHealthStore,
+    target_employer_id,
+    target_health_status,
+)
 from .job_parser import DeterministicJobParser
 from .models import (
     CandidateProfile,
@@ -39,11 +44,13 @@ from .sources import (
     JsonHttpClient,
     PoliteJsonClient,
     SourceAdapter,
+    SourceConfigurationError,
     SourceFailure,
     SourceJob,
     create_adapter,
     supported_sources,
 )
+from .sources.workday import validate_workday_target
 
 
 class DiscoveryConfigError(ValueError):
@@ -112,6 +119,8 @@ class DiscoveryRunSummary:
     output_dir: str = ""
     job_pool: str = ""
     state_path: str = ""
+    health_path: str = ""
+    employer_health: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def failure_count(self) -> int:
@@ -204,6 +213,11 @@ def load_discovery_config(path: str | Path) -> DiscoveryConfig:
             raise DiscoveryConfigError(
                 f"targets[{index}] uses unsupported source '{target.source}'."
             )
+        if target.source == "workday":
+            try:
+                validate_workday_target(target)
+            except SourceConfigurationError as exc:
+                raise DiscoveryConfigError(f"targets[{index}]: {exc}") from exc
         known_tracks = set(families) | set(tracks)
         unknown_families = sorted(set(target.job_families) - known_tracks)
         if unknown_families:
@@ -390,6 +404,9 @@ class DiscoveryRunner:
             output_dir=str(self.output_dir),
         )
         self._prepare_output()
+        health_path = self.output_dir / "health" / "employer_health.json"
+        health = EmployerHealthStore(health_path)
+        summary.health_path = str(health_path)
         self._log("run_started", {"started_at": started_at, "sources": summary.selected_sources})
 
         relevance_evaluator = JobRelevanceEvaluator(
@@ -408,6 +425,7 @@ class DiscoveryRunner:
 
         fetched: list[SourceJob] = []
         for target in targets:
+            employer_id = target_employer_id(target)
             summary.targets_attempted += 1
             try:
                 adapter = self.adapter_factory(target.source, self.client)
@@ -425,6 +443,21 @@ class DiscoveryRunner:
                 summary.source_errors.append(failure)
                 self._log("source_error", failure.to_dict())
                 self._write_error(failure, "source")
+                status = (
+                    "invalid_config"
+                    if isinstance(exc, SourceConfigurationError)
+                    else "unsupported"
+                    if "Unsupported" in type(exc).__name__
+                    else "temporarily_failed"
+                )
+                summary.employer_health[employer_id] = health.record(
+                    employer_id=employer_id,
+                    employer=target.company or target.board,
+                    source=target.source,
+                    status=status,
+                    checked_at=started_at,
+                    error=str(exc),
+                )
                 continue
             summary.jobs_fetched += len(batch.jobs)
             summary.source_pages[target.source] = (
@@ -434,6 +467,18 @@ class DiscoveryRunner:
             for failure in batch.errors:
                 self._log("source_error", failure.to_dict())
                 self._write_error(failure, "source")
+            health_status, health_error = target_health_status(
+                batch.errors, len(batch.jobs)
+            )
+            summary.employer_health[employer_id] = health.record(
+                employer_id=employer_id,
+                employer=target.company or target.board,
+                source=target.source,
+                status=health_status,
+                checked_at=started_at,
+                jobs_found=len(batch.jobs),
+                error=health_error,
+            )
             retained: list[SourceJob] = []
             for job in batch.jobs:
                 tracks = job.metadata.get("_discovery_tracks", [])
@@ -441,6 +486,10 @@ class DiscoveryRunner:
                     tracks = []
                 job.metadata["_discovery_tracks"] = list(
                     dict.fromkeys([*tracks, *target.job_families])
+                )
+                job.metadata["_discovery_employer_id"] = employer_id
+                job.metadata["_discovery_registry_priority"] = target.options.get(
+                    "registry_priority"
                 )
                 self._write_raw(job, started_at)
                 matched, reason, freshness = self._matches_target(job, target)
@@ -461,6 +510,7 @@ class DiscoveryRunner:
                 {
                     "source": target.source,
                     "board": target.board,
+                    "employer_id": employer_id,
                     "fetched": len(batch.jobs),
                     "retained": len(retained),
                     "pages_fetched": batch.pages_fetched,
@@ -592,6 +642,7 @@ class DiscoveryRunner:
 
         if state is not None:
             state.save()
+        health.save()
         _write_json(self.output_dir / "recommended" / "current_queue.json", recommended_records)
         _write_json(self.output_dir / "irrelevant" / "current_queue.json", irrelevant_records)
         _write_json(
@@ -650,6 +701,7 @@ class DiscoveryRunner:
             "irrelevant",
             "errors",
             "state",
+            "health",
         ):
             (self.output_dir / name).mkdir(parents=True, exist_ok=True)
 

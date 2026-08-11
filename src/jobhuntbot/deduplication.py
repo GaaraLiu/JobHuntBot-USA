@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
 from typing import Any
 
 from .normalization import canonicalize_url, normalize_text_key
@@ -113,6 +114,35 @@ def _merge_missing_fields(kept: SourceJob, duplicate: SourceJob) -> None:
         metadata["_discovery_tracks"] = list(
             dict.fromkeys([*kept_tracks, *duplicate_tracks])
         )
+    for key in ("discovered_via",):
+        kept_values = metadata.get(key, [])
+        duplicate_values = duplicate.metadata.get(key, [])
+        if isinstance(kept_values, str):
+            kept_values = [kept_values]
+        if isinstance(duplicate_values, str):
+            duplicate_values = [duplicate_values]
+        if isinstance(kept_values, list) and isinstance(duplicate_values, list):
+            metadata[key] = list(dict.fromkeys([*kept_values, *duplicate_values]))
+    kept_provenance = metadata.get("_discovery_provenance", [])
+    duplicate_provenance = duplicate.metadata.get("_discovery_provenance", [])
+    if isinstance(kept_provenance, list) and isinstance(duplicate_provenance, list):
+        merged_provenance: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in [*kept_provenance, *duplicate_provenance]:
+            if not isinstance(item, dict):
+                continue
+            identity = json.dumps(
+                item, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged_provenance.append(dict(item))
+        metadata["_discovery_provenance"] = merged_provenance
+    if not metadata.get("authoritative_source") and duplicate.metadata.get(
+        "authoritative_source"
+    ):
+        metadata["authoritative_source"] = duplicate.metadata["authoritative_source"]
     duplicate_sources = list(metadata.get("duplicate_sources") or [])
     duplicate_sources.append(
         {

@@ -1,0 +1,13 @@
+[
+  {
+    "entityUrn": "urn:li:jobPosting:10001",
+    "title": "Data Analyst",
+    "companyName": "Example Analytics",
+    "formattedLocation": "New York, NY",
+    "listedAt": 1786320000000,
+    "jobPostingUrl": "https://www.linkedin.com/jobs/view/10001?trk=public_jobs",
+    "externalApplyUrl": "https://boards.greenhouse.io/example/jobs/12345?utm_source=linkedin",
+    "descriptionSnippet": "Build dashboards and reporting.",
+    "metadata": {"fixture": true}
+  }
+]

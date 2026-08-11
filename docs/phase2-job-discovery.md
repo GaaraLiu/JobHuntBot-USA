@@ -1,6 +1,6 @@
 # Phase 2: U.S. job discovery
 
-Phase 2 retrieves public employer postings from supported ATS interfaces, keeps their source evidence, and deterministically removes duplicates. Phase 2.1 applies frozen Phase 1 normalization (including seniority), then adds an explainable relevance gate and private incremental state before scoring and resume routing. Phase 2.2 adds bounded Workday CXS retrieval and a private employer registry. It does not automate applications.
+Phase 2 retrieves public employer postings from supported ATS interfaces, keeps their source evidence, and deterministically removes duplicates. Phase 2.1 applies frozen Phase 1 normalization (including seniority), then adds an explainable relevance gate and private incremental state before scoring and resume routing. Phase 2.2 adds bounded Workday CXS retrieval and a private employer registry. Phase 2.3 adds lead-only LinkedIn/Indeed discovery candidates and deterministic handoff to authoritative supported ATS postings. It does not automate applications.
 
 ## Supported public sources
 
@@ -11,6 +11,22 @@ Phase 2 retrieves public employer postings from supported ATS interfaces, keeps 
 - Workday public CXS career-site pattern: `{base_url}/wday/cxs/{tenant}/{career_site}/jobs`
 
 Only public, employer-provided listing interfaces are used. The HTTP client has a descriptive User-Agent, a timeout, bounded retries, and configurable polite pacing. It does not bypass authentication, rate limits, CAPTCHAs, or access controls.
+
+LinkedIn and Indeed are optional discovery sources rather than authoritative JD sources. A normally accessible public HTML result or a user-supplied private structured candidate file may provide title, company, location, date, aggregator URL, external URL, and a short excerpt. Missing facts remain null. A snippet is never expanded into a job description or sent to scoring.
+
+## Aggregator discovery and ATS resolution
+
+Copy `templates/aggregator_discovery.template.json` to an ignored path such as `my-materials/discovery/aggregator_discovery.json`. Keep real query URLs, search terms, locations, and captured candidates private. Each enabled target must choose exactly one input method: `search_url` for one ordinary public HTML request, or `input_file` for a private JSON/JSONL array obtained through a compliant user-controlled process. Both methods produce the same `ExternalJobCandidate` contract.
+
+External URLs are unwrapped from common redirect parameters, fragments and tracking parameters are removed, and source-specific identifiers are required before an ATS mapping is accepted. Supported mappings are:
+
+- `jobs.smartrecruiters.com/{companyIdentifier}/{posting}`
+- `boards.greenhouse.io/{board}/jobs/{id}` and `job-boards.greenhouse.io/{board}/jobs/{id}`
+- `jobs.lever.co/{site}/{id}`
+- `jobs.ashbyhq.com/{board}/{id}`
+- `{tenant}.*.myworkdayjobs.com/{locale}/{career_site}/job/..._{requisition}`
+
+The existing ATS adapter then retrieves the authoritative full posting. Successful jobs record both `discovered_via` and `authoritative_source`. A supported URL whose bounded authoritative request fails becomes `blocked_or_unavailable`; unsupported company pages, unresolved links, and excerpt-only candidates remain in audit output and never enter normal scoring.
 
 ## Configuration
 
@@ -70,6 +86,24 @@ python -m jobhuntbot discover \
 
 Repeat `--source greenhouse` (or another supported source) to limit sources. Add `--limit 10` for a bounded run. Add `--discovery-only` to retrieve, filter, deduplicate, normalize, and evaluate relevance without scoring or resume routing. Add `--reanalyze-unchanged` only when an explicit repeat analysis is needed. Add `--json` for a machine-readable run summary.
 
+Aggregator-only or combined discovery uses the same policy configuration and output root:
+
+```bash
+python -m jobhuntbot discover \
+  --profile my-materials/candidate_profile.json \
+  --resume-routing my-materials/resume_routing.json \
+  --scoring-config my-materials/config/jobhuntbot.local.json \
+  --discovery-config my-materials/discovery/discovery_config.json \
+  --aggregator-config my-materials/discovery/aggregator_discovery.json \
+  --employer-registry my-materials/discovery/employer_registry.json \
+  --source linkedin \
+  --source greenhouse \
+  --limit 10 \
+  --output-dir my-materials/discovery/phase2.3
+```
+
+Use `--source linkedin` and/or `--source indeed` to select aggregator targets. Omit source filters to combine enabled registry/direct ATS targets and enabled aggregator targets. Public access failure is returned in `aggregator_source_status` and private errors instead of crashing the whole run.
+
 Registry-driven discovery reuses the same policy configuration and downstream pipeline:
 
 ```bash
@@ -114,8 +148,10 @@ The default output root is ignored `my-materials/discovery/`:
 - `discovery_log.jsonl`: source failures, job failures, duplicate reasons, and run summaries
 - `job_pool.csv`: relevant current-run jobs ranked by decision, score, and evidence coverage
 
+For Phase 2.3, use an ignored root such as `my-materials/discovery/phase2.3/`. It additionally contains `raw_candidates/`, `resolved/`, `unresolved/`, `provenance/`, and `aggregator_source_status.json`. The existing `raw/`, `normalized/`, `results/`, `recommended/`, `irrelevant/`, `errors/`, and `state/` directories continue to own the authoritative downstream pipeline artifacts.
+
 All APPLY, REVIEW, and SKIP results are retained. Real discovery never writes `dashboard/job_pool.csv` by default. One employer, source, or posting failure is logged without aborting other targets. A successfully queried board with zero postings is `empty`, not a failure.
 
 ## Out of scope
 
-This phase contains no LinkedIn, Indeed, browser automation, authentication bypass, form filling, resume upload, application submission, or auto-submit behavior. Workday support is limited to explicitly configured public structured CXS patterns; compatibility with every Workday deployment is not claimed.
+This phase contains no account login, authentication/CAPTCHA bypass, anti-bot evasion, proxy or identity rotation, browser automation, LinkedIn Easy Apply, Indeed Apply, form filling, resume upload, application submission, or auto-submit behavior. LinkedIn/Indeed support is limited to normally accessible public discovery facts or private structured candidate inputs; access that requires circumvention is unsupported. Workday support remains limited to explicitly configured public structured CXS patterns, and compatibility with every site is not claimed.

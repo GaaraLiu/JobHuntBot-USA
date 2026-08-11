@@ -89,6 +89,14 @@ class DiscoveryConfig:
 
 
 @dataclass(slots=True)
+class DiscoverySeed:
+    """An authoritative SourceJob obtained before registry target retrieval."""
+
+    job: SourceJob
+    target: DiscoveryTarget
+
+
+@dataclass(slots=True)
 class DiscoveryRunSummary:
     started_at: str
     completed_at: str = ""
@@ -121,6 +129,12 @@ class DiscoveryRunSummary:
     state_path: str = ""
     health_path: str = ""
     employer_health: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aggregator_candidates: int = 0
+    aggregator_resolved: int = 0
+    aggregator_unresolved: int = 0
+    aggregator_duplicates: int = 0
+    aggregator_source_status: dict[str, dict[str, Any]] = field(default_factory=dict)
+    aggregator_output: str = ""
 
     @property
     def failure_count(self) -> int:
@@ -384,6 +398,8 @@ class DiscoveryRunner:
         limit: int | None = None,
         discovery_only: bool = False,
         reanalyze_unchanged: bool = False,
+        seed_jobs: Sequence[DiscoverySeed] | None = None,
+        seed_failures: Sequence[SourceFailure] | None = None,
     ) -> DiscoveryRunSummary:
         if limit is not None and limit < 1:
             raise DiscoveryConfigError("Run limit must be positive.")
@@ -409,6 +425,11 @@ class DiscoveryRunner:
         summary.health_path = str(health_path)
         self._log("run_started", {"started_at": started_at, "sources": summary.selected_sources})
 
+        for failure in seed_failures or ():
+            summary.source_errors.append(failure)
+            self._log("source_error", failure.to_dict())
+            self._write_error(failure, "aggregator_handoff")
+
         relevance_evaluator = JobRelevanceEvaluator(
             self.config.career_tracks,
             self.config.relevance_policy,
@@ -424,6 +445,27 @@ class DiscoveryRunner:
         irrelevant_records: list[dict[str, Any]] = []
 
         fetched: list[SourceJob] = []
+        for seed in seed_jobs or ():
+            job = seed.job
+            target = seed.target
+            summary.jobs_fetched += 1
+            tracks = job.metadata.get("_discovery_tracks", [])
+            if not isinstance(tracks, list):
+                tracks = []
+            job.metadata["_discovery_tracks"] = list(
+                dict.fromkeys([*tracks, *target.job_families])
+            )
+            self._write_raw(job, started_at)
+            matched, reason, freshness = self._matches_target(job, target)
+            if freshness == "unknown":
+                summary.freshness_unknown += 1
+            if matched:
+                fetched.append(job)
+            else:
+                record = self._target_filter_record(job, reason, freshness, started_at)
+                irrelevant_records.append(record)
+                summary.jobs_irrelevant += 1
+                self._write_queue_record("irrelevant", record)
         for target in targets:
             employer_id = target_employer_id(target)
             summary.targets_attempted += 1

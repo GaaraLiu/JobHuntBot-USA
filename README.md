@@ -82,9 +82,9 @@ python -m unittest discover -s tests -v
 
 See `docs/phase1-architecture.md` and `docs/data-schema.md` for design and schema details.
 
-### Planned for later phases — not implemented
+### Discovery and automation boundaries
 
-Phase 1 does **not** include LinkedIn or Indeed scraping, job-site adapters, browser automation, Playwright/Selenium, authentication, CAPTCHA handling, ATS submission, automatic application submission, automatic resume rewriting, LLM APIs, or a database. The written agent workflow may be used with separately authorized external tools, but those capabilities are not provided by this executable core.
+Phase 1 remains a local scoring core. Phase 2 adds bounded public ATS discovery, a private employer registry, and lead-only LinkedIn/Indeed candidate inputs with deterministic handoff to supported employer ATS postings. Aggregator snippets are never treated as full job descriptions; blocked or unavailable public access is reported without circumvention. The project still does **not** include browser automation, Playwright/Selenium, account login, CAPTCHA bypass, Easy Apply/Indeed Apply, form filling, ATS submission, automatic application submission, automatic resume rewriting, LLM APIs, or a database. See `docs/phase2-job-discovery.md`.
 
 ## Quick Start
 
@@ -202,7 +202,7 @@ python -m unittest discover -s tests -v
 
 具体分析命令及参数见上方英文版“Phase 1 Executable Core”。
 
-尚未实现：LinkedIn/Indeed 抓取、浏览器自动化、Playwright/Selenium、登录或 CAPTCHA 处理、ATS 提交、自动投递、自动改写简历、LLM API 和数据库。这些属于后续阶段。
+Phase 2 已支持受控的公开 ATS 发现、私有雇主注册表，以及仅作为线索来源的 LinkedIn/Indeed 候选输入；只有解析到受支持的雇主 ATS 并取得完整职位描述后才会评分。若公开访问被阻止，系统会如实报告而不会绕过限制。仍未实现：浏览器自动化、Playwright/Selenium、账号登录、CAPTCHA 绕过、Easy Apply/Indeed Apply、表单填写、ATS 提交、自动投递、自动改写简历、LLM API 和数据库。
 
 ### 快速开始
 

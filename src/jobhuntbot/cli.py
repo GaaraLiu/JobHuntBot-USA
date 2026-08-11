@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .aggregator_discovery import AggregatorDiscoveryCoordinator
+from .aggregators import (
+    AGGREGATOR_SOURCES,
+    AggregatorConfigError,
+    PoliteTextClient,
+    load_aggregator_config,
+)
 from .config import ConfigError, load_config
 from .discovery import DiscoveryConfigError, DiscoveryRunner, load_discovery_config
 from .employer_registry import (
@@ -63,6 +70,11 @@ def _build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--profile", required=True, type=Path)
     discover.add_argument("--discovery-config", type=Path)
     discover.add_argument(
+        "--aggregator-config",
+        type=Path,
+        help="Private LinkedIn/Indeed discovery-candidate configuration.",
+    )
+    discover.add_argument(
         "--employer-registry",
         type=Path,
         help="Private employer registry used to generate discovery targets.",
@@ -78,8 +90,8 @@ def _build_parser() -> argparse.ArgumentParser:
     discover.add_argument(
         "--source",
         action="append",
-        choices=supported_sources(),
-        help="Limit the run to one or more configured ATS sources.",
+        choices=tuple(sorted({*supported_sources(), *AGGREGATOR_SOURCES})),
+        help="Limit the run to configured ATS and/or aggregator discovery sources.",
     )
     discover.add_argument("--limit", type=int, help="Maximum unique jobs for this run.")
     discover.add_argument(
@@ -218,6 +230,12 @@ def _print_discovery_summary(summary, as_json: bool) -> None:
         f"APPLY={summary.apply_count}, REVIEW={summary.review_count}, SKIP={summary.skip_count}"
     )
     print(f"Failures captured: {summary.failure_count}")
+    if summary.aggregator_source_status:
+        print(f"Aggregator candidates: {summary.aggregator_candidates}")
+        print(f"Aggregator ATS resolutions: {summary.aggregator_resolved}")
+        print(f"Aggregator unresolved: {summary.aggregator_unresolved}")
+        for source, status in summary.aggregator_source_status.items():
+            print(f"Aggregator {source}: {status.get('status', 'unknown')}")
     print(f"Private output: {summary.output_dir}")
     if summary.job_pool:
         print(f"Ranked job pool: {summary.job_pool}")
@@ -271,11 +289,19 @@ def _registry_discovery_config_path(args, registry) -> Path:
 
 def _registry_targets(args, registry, discovery_config):
     known_tracks = list(discovery_config.career_tracks or discovery_config.job_families)
+    requested_sources = getattr(args, "source", None)
+    registry_sources = (
+        [item for item in requested_sources if item in supported_sources()]
+        if requested_sources
+        else None
+    )
+    if requested_sources and not registry_sources:
+        return []
     return generate_registry_targets(
         registry,
         known_tracks=known_tracks,
         tracks=getattr(args, "track", None),
-        sources=getattr(args, "source", None),
+        sources=registry_sources,
         minimum_priority=getattr(args, "min_priority", None),
         max_employers=getattr(args, "max_employers", None),
     )
@@ -350,19 +376,62 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "--track, --min-priority, and --max-employers require --employer-registry."
                     )
                 discovery_config = load_discovery_config(args.discovery_config)
+            selected_ats = [
+                item for item in (args.source or []) if item in supported_sources()
+            ]
+            selected_aggregators = [
+                item for item in (args.source or []) if item in AGGREGATOR_SOURCES
+            ]
+            if args.source and not selected_ats:
+                discovery_config.targets = []
+            if selected_aggregators and args.aggregator_config is None:
+                raise DiscoveryConfigError(
+                    "--source linkedin/indeed requires --aggregator-config."
+                )
+            json_client = PoliteJsonClient(
+                timeout_seconds=discovery_config.request.timeout_seconds,
+                retries=discovery_config.request.retries,
+                min_interval_seconds=discovery_config.request.min_interval_seconds,
+                user_agent=discovery_config.request.user_agent,
+            )
+            preparation = None
+            if args.aggregator_config is not None and (
+                not args.source or selected_aggregators
+            ):
+                aggregator_config = load_aggregator_config(args.aggregator_config)
+                text_client = PoliteTextClient(
+                    timeout_seconds=discovery_config.request.timeout_seconds,
+                    retries=discovery_config.request.retries,
+                    min_interval_seconds=discovery_config.request.min_interval_seconds,
+                    user_agent=discovery_config.request.user_agent,
+                )
+                preparation = AggregatorDiscoveryCoordinator(
+                    config=aggregator_config,
+                    output_dir=args.output_dir,
+                    text_client=text_client,
+                    json_client=json_client,
+                ).prepare(
+                    sources=selected_aggregators if args.source else None,
+                    limit=args.limit,
+                )
             runner = DiscoveryRunner(
                 profile=profile,
                 app_config=config,
                 resume_router=router,
                 discovery_config=discovery_config,
                 output_dir=args.output_dir,
+                client=json_client,
             )
             summary = runner.run(
-                sources=args.source,
+                sources=selected_ats if args.source and selected_ats else None,
                 limit=args.limit,
                 discovery_only=args.discovery_only,
                 reanalyze_unchanged=args.reanalyze_unchanged,
+                seed_jobs=None if preparation is None else preparation.seeds,
+                seed_failures=None if preparation is None else preparation.failures,
             )
+            if preparation is not None:
+                preparation.apply_to(summary)
             _print_discovery_summary(summary, args.as_json)
             return 0
 
@@ -419,6 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (
         ConfigError,
+        AggregatorConfigError,
         DiscoveryConfigError,
         EmployerRegistryError,
         ProfileLoadError,

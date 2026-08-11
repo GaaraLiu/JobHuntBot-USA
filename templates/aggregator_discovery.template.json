@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "source": "linkedin",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["higher_education"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "linkedin",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["data_bi"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "linkedin",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["urban_transport_gis"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "linkedin",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["applied_ai"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "indeed",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["higher_education"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "indeed",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["data_bi"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "indeed",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["urban_transport_gis"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    },
+    {
+      "source": "indeed",
+      "enabled": false,
+      "search_url": "REPLACE_WITH_NORMALLY_ACCESSIBLE_PUBLIC_SEARCH_URL",
+      "job_families": ["applied_ai"],
+      "search_keywords": ["REPLACE_WITH_PRIVATE_SEARCH_TERM"],
+      "location_filter": ["REPLACE_WITH_PRIVATE_US_LOCATION"],
+      "employment_types": ["full-time"],
+      "posted_within_days": null,
+      "max_results": 5
+    }
+  ]
+}

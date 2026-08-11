@@ -1,0 +1,13 @@
+[
+  {
+    "jobkey": "indeed-20002",
+    "jobTitle": "GIS Analyst",
+    "company": "Example Planning",
+    "formattedLocation": "Boston, MA",
+    "datePosted": "2026-08-09",
+    "viewJobLink": "https://www.indeed.com/viewjob?jk=indeed-20002&from=search",
+    "externalApplyUrl": "https://jobs.lever.co/example/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?lever-source=Indeed",
+    "snippet": "Support spatial analysis and GIS mapping.",
+    "metadata": {"fixture": true}
+  }
+]

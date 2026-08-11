@@ -1,5 +1,11 @@
 # JobHuntBot
 
+Phase 3.0 adds a private application-preparation layer: an APPLY-only queue,
+provenance-aware application profile, deterministic answer bank, unresolved
+question tracking, and reviewable packages. It does not perform browser
+automation or submit applications. See
+[`docs/application_preparation.md`](docs/application_preparation.md).
+
 **English** below · [中文](#中文说明) 在下方
 
 An agent-led job application workflow and local progress-tracking dashboard. It works with any AI coding agent that can read a file and follow written instructions (Claude Code, Codex CLI, Cursor, etc.) — there's no special integration required, you just point the agent at `SKILL.md` and tell it to follow the workflow. It turns scattered job hunting into a repeatable system: candidate profile, screening rules, resume strategy, application execution, blocker triage, follow-up, and a browser-based dashboard to see it all at a glance.

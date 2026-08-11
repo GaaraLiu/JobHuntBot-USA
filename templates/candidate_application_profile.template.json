@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "legal_first_name": {"value": "<CONFIRM_LEGAL_FIRST_NAME>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Do not substitute a preferred name."},
+    "legal_middle_name": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "legal_last_name": {"value": "<CONFIRM_LEGAL_LAST_NAME>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
+    "preferred_name": {"value": "<OPTIONAL_PREFERRED_NAME>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
+    "email": {"value": "<CONFIRM_EMAIL>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
+    "phone": {"value": "<CONFIRM_PHONE>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
+    "current_address": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "current_city": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "current_state": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "postal_code": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "current_country": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""}
+  },
+  "work_authorization": {
+    "authorized_to_work_us": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "requires_sponsorship_now": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "requires_sponsorship_future": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "us_citizen": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never infer from authorization."},
+    "permanent_resident": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "citizenships": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never infer citizenship."},
+    "security_clearance": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never infer a clearance."},
+    "export_control_eligibility": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Confirm against the exact question."}
+  },
+  "education": [
+    {
+      "education_id": "example_degree_1",
+      "institution": {"value": "Example University", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Fictional placeholder."},
+      "degree": {"value": "Example Degree", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Fictional placeholder."},
+      "field_of_study": {"value": "Example Field", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Fictional placeholder."},
+      "graduation_date": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+      "completion_status": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+      "gpa": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""}
+    }
+  ],
+  "employment_history": [
+    {
+      "employment_id": "example_employment_1",
+      "employer": {"value": "Example Employer", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Fictional placeholder."},
+      "title": {"value": "Example Role", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Fictional placeholder."},
+      "start_date": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+      "end_date": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+      "currently_employed": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""}
+    }
+  ],
+  "links": {
+    "linkedin": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "github": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "portfolio": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""}
+  },
+  "job_preferences": {
+    "location_policy": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Keep private locations out of tracked templates."},
+    "salary_response_policy": {"value": {"strategy": "manual", "amount": null}, "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Do not assume a universal salary number."},
+    "available_start_date": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "notice_period": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "travel_willingness": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""}
+  },
+  "application_policies": {
+    "years_of_experience": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Do not derive a total from project dates."},
+    "years_python_experience": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Domain-specific experience stays separate."},
+    "years_data_analysis_experience": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Domain-specific experience stays separate."},
+    "years_ml_engineering_experience": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Projects are not production MLE employment."},
+    "previously_employed_by_company": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Company-specific."},
+    "related_to_current_employee": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Company-specific."},
+    "non_compete": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never guess."},
+    "government_employment": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never guess."},
+    "driver_license": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never guess."},
+    "professional_licenses": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Never guess."}
+  },
+  "demographics_policy": {
+    "default_response": {"value": "prefer_not_to_answer", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "No protected characteristic is inferred."},
+    "allowed_autofill": {"value": false, "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": "Manual by default."}
+  },
+  "conflicts": [],
+  "required_for_ready": [
+    "identity.legal_first_name",
+    "identity.legal_last_name",
+    "identity.email",
+    "identity.phone",
+    "identity.current_address",
+    "identity.current_city",
+    "identity.current_state",
+    "identity.postal_code",
+    "identity.current_country",
+    "work_authorization.authorized_to_work_us",
+    "work_authorization.requires_sponsorship_now",
+    "work_authorization.requires_sponsorship_future"
+  ]
+}

@@ -9,6 +9,19 @@ from pathlib import Path
 from typing import Sequence
 
 from .aggregator_discovery import AggregatorDiscoveryCoordinator
+from .answer_bank import AnswerBankError, AnswerResolver, load_answer_bank, validate_answer_bank
+from .application_profile import (
+    ApplicationProfileError,
+    load_application_profile,
+    validate_application_profile,
+)
+from .application_queue import (
+    ApplicationPackageBuilder,
+    ApplicationQueueError,
+    ApplicationQueueStore,
+    load_pipeline_candidates,
+    load_questions,
+)
 from .aggregators import (
     AGGREGATOR_SOURCES,
     AggregatorConfigError,
@@ -141,6 +154,83 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Explicitly make bounded public endpoint checks (never enabled by default).",
     )
     validate_registry.add_argument("--json", action="store_true", dest="as_json")
+
+    queue_import = subparsers.add_parser(
+        "application-queue-import",
+        help="Import eligible Phase 1/2 results into the private application queue.",
+    )
+    queue_import.add_argument("--input", required=True, type=Path)
+    queue_import.add_argument(
+        "--queue",
+        type=Path,
+        default=Path("my-materials/application/application_queue.json"),
+    )
+    queue_import.add_argument(
+        "--promote-review-job-id",
+        action="append",
+        default=[],
+        help="Explicitly promote one REVIEW job for preparation; original decision is preserved.",
+    )
+    queue_import.add_argument("--json", action="store_true", dest="as_json")
+
+    queue_list = subparsers.add_parser(
+        "application-queue-list", help="List private application queue records."
+    )
+    queue_list.add_argument(
+        "--queue",
+        type=Path,
+        default=Path("my-materials/application/application_queue.json"),
+    )
+    queue_list.add_argument("--status", choices=(
+        "ALL", "READY_TO_PREPARE", "PREPARING", "WAITING_FOR_USER", "NEEDS_REVIEW",
+        "PACKAGE_READY", "READY_FOR_APPLICATION", "IN_PROGRESS", "FAILED",
+        "WITHDRAWN", "SKIPPED"
+    ), default="ALL")
+    queue_list.add_argument("--json", action="store_true", dest="as_json")
+
+    package_build = subparsers.add_parser(
+        "application-package-build",
+        help="Build a private, reviewable application package without form interaction.",
+    )
+    package_build.add_argument("--application-id", required=True)
+    package_build.add_argument(
+        "--application-root", type=Path, default=Path("my-materials/application")
+    )
+    package_build.add_argument(
+        "--queue", type=Path, default=Path("my-materials/application/application_queue.json")
+    )
+    package_build.add_argument(
+        "--application-profile",
+        type=Path,
+        default=Path("my-materials/application/candidate_application_profile.json"),
+    )
+    package_build.add_argument(
+        "--answer-bank", type=Path, default=Path("my-materials/application/answer_bank.json")
+    )
+    package_build.add_argument("--questions", required=True, type=Path)
+    package_build.add_argument(
+        "--cover-letter-status",
+        choices=("not_required", "optional", "required", "unknown", "needs_generation"),
+        default="unknown",
+    )
+    package_build.add_argument("--json", action="store_true", dest="as_json")
+
+    validate_bank = subparsers.add_parser(
+        "validate-answer-bank", help="Validate a private answer bank and application profile."
+    )
+    validate_bank.add_argument("--answer-bank", required=True, type=Path)
+    validate_bank.add_argument("--application-profile", required=True, type=Path)
+    validate_bank.add_argument("--json", action="store_true", dest="as_json")
+
+    unresolved = subparsers.add_parser(
+        "answer-bank-unresolved",
+        help="Resolve structured questions and report only unresolved items.",
+    )
+    unresolved.add_argument("--answer-bank", required=True, type=Path)
+    unresolved.add_argument("--application-profile", required=True, type=Path)
+    unresolved.add_argument("--questions", required=True, type=Path)
+    unresolved.add_argument("--job", type=Path)
+    unresolved.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -348,6 +438,101 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "application-queue-import":
+            candidates = load_pipeline_candidates(args.input)
+            report = ApplicationQueueStore(args.queue).import_candidates(
+                candidates,
+                source_path=str(args.input),
+                promote_review_job_ids=set(args.promote_review_job_id),
+            )
+            value = report.to_dict()
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(
+                    "Application queue import: "
+                    f"added={report.added}, duplicate={report.duplicate}, "
+                    f"changed={report.changed}, REVIEW excluded={report.review_excluded}, "
+                    f"SKIP excluded={report.skip_excluded}"
+                )
+            return 0
+
+        if args.command == "application-queue-list":
+            applications = ApplicationQueueStore(args.queue).load()["applications"]
+            if args.status != "ALL":
+                applications = [item for item in applications if item.get("application_status") == args.status]
+            if args.as_json:
+                print(json.dumps({"applications": applications}, ensure_ascii=True, indent=2))
+            else:
+                for item in applications:
+                    print(
+                        f"{item.get('application_id')} | {item.get('application_status')} | "
+                        f"{item.get('company')} | {item.get('title')}"
+                    )
+            return 0
+
+        if args.command == "validate-answer-bank":
+            profile = load_application_profile(args.application_profile)
+            bank = load_answer_bank(args.answer_bank)
+            issues = [
+                {"severity": severity, "path": path, "message": message}
+                for severity, path, message in (
+                    validate_application_profile(profile) + validate_answer_bank(bank)
+                )
+            ]
+            value = {"valid": not any(item["severity"] == "error" for item in issues), "issues": issues}
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Valid: {'yes' if value['valid'] else 'no'}")
+                for item in issues:
+                    print(f"[{item['severity'].upper()}] {item['path']}: {item['message']}")
+            return 0 if value["valid"] else 1
+
+        if args.command == "answer-bank-unresolved":
+            profile = load_application_profile(args.application_profile)
+            bank = load_answer_bank(args.answer_bank)
+            questions = load_questions(args.questions)
+            job = {}
+            if args.job:
+                job_value = json.loads(args.job.read_text(encoding="utf-8"))
+                job = job_value.get("job", job_value) if isinstance(job_value, dict) else {}
+            result = AnswerResolver(profile, bank).resolve(questions, job)
+            value = {
+                "prepared_count": len(result.answers),
+                "unresolved_count": len(result.unresolved),
+                "unresolved": [item.to_dict() for item in result.unresolved],
+            }
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Prepared: {len(result.answers)}; unresolved: {len(result.unresolved)}")
+                for item in result.unresolved:
+                    print(f"{item.question_id}: {item.reason}")
+            return 0
+
+        if args.command == "application-package-build":
+            profile = load_application_profile(args.application_profile)
+            bank = load_answer_bank(args.answer_bank)
+            package = ApplicationPackageBuilder(
+                queue_store=ApplicationQueueStore(args.queue),
+                application_root=args.application_root,
+                profile=profile,
+                answer_bank=bank,
+            ).build(
+                args.application_id,
+                load_questions(args.questions),
+                cover_letter_status=args.cover_letter_status,
+            )
+            value = package.to_dict()
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Application package: {package.application_id}")
+                print(f"Readiness: {package.package_readiness}")
+                print(f"Unresolved: {len(package.unresolved_questions)}")
+            return 0
+
         if args.command == "validate-profile":
             profile = load_candidate_profile(args.profile)
             result = validate_candidate_profile(profile)
@@ -496,6 +681,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         PipelineValidationError,
         SchemaMismatchError,
         StorageError,
+        AnswerBankError,
+        ApplicationProfileError,
+        ApplicationQueueError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

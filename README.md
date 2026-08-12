@@ -2,8 +2,10 @@
 
 Phase 3.0 adds a private application-preparation layer: an APPLY-only queue,
 provenance-aware application profile, deterministic answer bank, unresolved
-question tracking, and reviewable packages. It does not perform browser
-automation or submit applications. See
+question tracking, and reviewable packages. Phase 3.2 adds read-only browser
+form extraction; Phase 3.3 adds explicit, controlled population of allowlisted
+verified fields behind mutation and submission firewalls. It never submits
+applications or uploads files. See
 [`docs/application_preparation.md`](docs/application_preparation.md).
 
 **English** below · [中文](#中文说明) 在下方
@@ -90,7 +92,7 @@ See `docs/phase1-architecture.md` and `docs/data-schema.md` for design and schem
 
 ### Discovery and automation boundaries
 
-Phase 1 remains a local scoring core. Phase 2 adds bounded public ATS discovery, a private employer registry, and lead-only LinkedIn/Indeed candidate inputs with deterministic handoff to supported employer ATS postings. Aggregator snippets are never treated as full job descriptions; blocked or unavailable public access is reported without circumvention. The project still does **not** include browser automation, Playwright/Selenium, account login, CAPTCHA bypass, Easy Apply/Indeed Apply, form filling, ATS submission, automatic application submission, automatic resume rewriting, LLM APIs, or a database. See `docs/phase2-job-discovery.md`.
+Phase 1 remains a local scoring core. Phase 2 adds bounded public ATS discovery, a private employer registry, and lead-only LinkedIn/Indeed candidate inputs with deterministic handoff to supported employer ATS postings. Aggregator snippets are never treated as full job descriptions; blocked or unavailable public access is reported without circumvention. Phase 3.2 optionally uses Playwright for read-only form extraction, and Phase 3.3 can populate a small allowlisted set only after an explicit flag. The project does **not** include account login, CAPTCHA bypass, Easy Apply/Indeed Apply, file upload, ATS submission, automatic application submission, automatic resume rewriting, LLM APIs, or a database. See `docs/phase2-job-discovery.md`, `docs/browser-readonly-form-extraction.md`, and `docs/controlled-autofill.md`.
 
 ## Quick Start
 

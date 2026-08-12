@@ -39,6 +39,17 @@ from .browser_forms import (
     BrowserSessionPolicy,
     PlaywrightReadOnlyBrowser,
 )
+from .controlled_fill import (
+    ControlledFillPlanner,
+    ControlledFillPolicy,
+    ControlledFillService,
+    FillDependencyError,
+    PlaywrightControlledFillBrowser,
+    load_mapping_plan,
+    load_private_object,
+    sanitized_fill_log,
+)
+from .browser_forms import BrowserRenderedForm
 from .aggregators import (
     AGGREGATOR_SOURCES,
     AggregatorConfigError,
@@ -306,6 +317,44 @@ def _build_parser() -> argparse.ArgumentParser:
     browser_form.add_argument("--no-follow-apply-link", action="store_false", dest="follow_apply")
     browser_form.set_defaults(follow_apply=True)
     browser_form.add_argument("--json", action="store_true", dest="as_json")
+
+    autofill = subparsers.add_parser(
+        "autofill-application",
+        help="Preview or explicitly execute controlled field population; submission is impossible.",
+    )
+    autofill.add_argument("--application-package", required=True, type=Path)
+    autofill.add_argument("--application-id", default="")
+    autofill.add_argument("--mapping-plan", required=True, type=Path)
+    autofill.add_argument("--application-form", required=True, type=Path)
+    autofill.add_argument("--browser-snapshot", required=True, type=Path)
+    autofill.add_argument("--url", default="")
+    autofill.add_argument(
+        "--output-root", type=Path, default=Path("my-materials/application")
+    )
+    autofill.add_argument(
+        "--execute-fill",
+        action="store_true",
+        help="Explicitly permit safe field population; never permits submission.",
+    )
+    autofill.add_argument(
+        "--preview",
+        action="store_true",
+        help="Explicit preview alias; preview is already the default.",
+    )
+    autofill.add_argument(
+        "--allow-partial-fill",
+        action="store_true",
+        help="Permit safe fields even when other required fields need user input.",
+    )
+    autofill.add_argument(
+        "--allow-file-upload",
+        action="store_true",
+        help="Preview file-upload intent only; live uploads remain disabled in Phase 3.3.",
+    )
+    autofill.add_argument("--timeout", type=int, default=20_000)
+    autofill.add_argument("--headless", action="store_true", default=True)
+    autofill.add_argument("--headed", action="store_false", dest="headless")
+    autofill.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -513,6 +562,65 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "autofill-application":
+            if args.preview and args.execute_fill:
+                raise ValueError("--preview and --execute-fill are mutually exclusive.")
+            mode = "CONTROLLED FILL" if args.execute_fill else "PREVIEW ONLY"
+            print(
+                f"{mode} - FORM SUBMISSION, LEGAL CONSENT, AND LIVE FILE UPLOAD ARE DISABLED.",
+                file=sys.stderr,
+            )
+            package = load_private_object(args.application_package)
+            package_id = str(package.get("application_id", ""))
+            if args.application_id and args.application_id != package_id:
+                raise ValueError("--application-id does not match the ApplicationPackage.")
+            mapping = load_mapping_plan(args.mapping_plan)
+            form = load_application_form(args.application_form)
+            rendered = BrowserRenderedForm.from_dict(load_private_object(args.browser_snapshot))
+            policy = ControlledFillPolicy(
+                execute_fill=args.execute_fill,
+                allow_partial_fill=args.allow_partial_fill,
+                allow_file_upload=args.allow_file_upload,
+                timeout_ms=args.timeout,
+                headless=args.headless,
+            )
+            plan = ControlledFillPlanner().build(
+                package, mapping, form, rendered, policy=policy
+            )
+            application_id = plan.application_id or "unidentified_application"
+            plan_path = args.output_root / "fill_plans" / f"{application_id}_fill_plan.json"
+            result_path = args.output_root / "fill_results" / f"{application_id}_fill_result.json"
+            log_path = args.output_root / "fill_logs" / f"{application_id}_fill_log.json"
+            save_private_json(plan_path, plan.to_dict())
+            backend = PlaywrightControlledFillBrowser() if args.execute_fill else None
+            service = ControlledFillService(backend)
+            target = args.url or rendered.final_url or form.application_url
+            result = service.run(target, plan, form, rendered, policy)
+            save_private_json(result_path, result.to_dict())
+            save_private_json(log_path, sanitized_fill_log(result))
+            value = {
+                "mode": mode,
+                "plan": plan.to_dict(),
+                "result": result.to_dict(),
+                "private_paths": {
+                    "fill_plan": str(plan_path),
+                    "fill_result": str(result_path),
+                    "fill_log": str(log_path),
+                },
+                "submission_possible": False,
+            }
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Application: {application_id}")
+                print(f"Plan status: {plan.overall_status}")
+                print(f"Safe fields planned: {plan.fill_fields}")
+                print(f"Required not fillable: {plan.required_not_fillable}")
+                print(f"Result: {result.overall_status}")
+                print("Submission attempted: no")
+                print("Submission completed: no")
+            return 0
+
         if args.command == "inspect-application-form":
             print(
                 "READ ONLY - NO FORM DATA WILL BE ENTERED, UPLOADED, OR SUBMITTED.",
@@ -914,6 +1022,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ApplicationProfileError,
         ApplicationQueueError,
         BrowserDependencyError,
+        FillDependencyError,
         OSError,
         ValueError,
     ) as exc:

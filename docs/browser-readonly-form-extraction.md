@@ -29,11 +29,13 @@ or retain credentials. Browser requests are limited to `GET`, `HEAD`, and
 `OPTIONS`; `POST`, `PUT`, `PATCH`, `DELETE`, and other mutation methods are
 aborted and recorded as method/path-only audit metadata.
 
-The backend intentionally contains no calls to Playwright input or interaction
-APIs such as `fill`, `type`, `click`, `check`, `select_option`, or
-`set_input_files`. A public Apply link may be followed only by navigating
-directly to its public HTTP(S) `href`. Buttons without a public link are not
-activated.
+The backend contains no application-data input, upload, consent, or submission
+calls (`fill`, `type`, `check`, `select_option`, or `set_input_files`). A public
+Apply link may be followed by navigating to its public HTTP(S) `href`. The only
+automated button activation is an exact, unambiguous Workday `Apply Manually`
+choice inside a detected `Start Your Application` chooser, and only in explicit
+manual-auth mode. Resume autofill, prior-application reuse, and LinkedIn choices
+are never selected.
 
 CAPTCHA/anti-bot challenges produce `BLOCKED_BY_ANTI_BOT`. Password/account
 walls produce `LOGIN_REQUIRED`. Neither is bypassed. A visible Next/Continue
@@ -84,15 +86,36 @@ To generate a local mapping plan after extraction, provide both
 job and selected-resume context. Those facts are used locally after DOM
 extraction and are never injected into the browser.
 
-The CLI always emits this warning before starting:
+The default CLI emits this warning before starting:
 
 ```text
 READ ONLY — NO FORM DATA WILL BE ENTERED, UPLOADED, OR SUBMITTED.
 ```
 
+### Workday manual authentication handoff
+
+Some Workday sites expose the form only after account authentication. This is
+an explicit, headed, human-controlled mode:
+
+```text
+python -m jobhuntbot.cli inspect-application-form \
+  --url https://example.wd5.myworkdayjobs.com/External/job/example \
+  --headed --manual-auth
+```
+
+JobHuntBot may select only the exact `Apply Manually` method, then pauses while
+the human signs in, creates an account, or completes MFA/CAPTCHA in the visible
+browser. During that pause, authentication traffic is temporarily permitted.
+After terminal confirmation, the GET/HEAD/OPTIONS firewall is immediately
+restored and the same non-persistent browser context is re-extracted. JobHuntBot
+does not read or enter credentials, fill application fields, upload a resume,
+or submit. EOF, cancellation, an unresolved login, and an unresolved CAPTCHA
+all stop safely without retry loops.
+
 ## Limitations
 
-Some ATS application schemas require mutation-style GraphQL requests, account
-creation, candidate data, or an anti-bot challenge. They remain blocked or
-partial. This is intentional: incomplete extraction is preferable to weakening
-the read-only boundary.
+Some ATS application schemas require mutation-style GraphQL requests or
+candidate data before fields render. Those requests remain blocked outside the
+explicit human authentication interval, so extraction may remain partial. This
+is intentional: incomplete extraction is preferable to weakening the automated
+inspection boundary.

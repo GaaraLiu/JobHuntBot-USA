@@ -14,6 +14,17 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class CliTests(unittest.TestCase):
+    def test_manual_auth_help_describes_human_controlled_headed_flow(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            main(["inspect-application-form", "--help"])
+        self.assertEqual(raised.exception.code, 0)
+        text = output.getvalue().lower()
+        self.assertIn("--manual-auth", text)
+        self.assertIn("headed browser", text)
+        self.assertIn("human-", text)
+        self.assertIn("controlled sign-in", text)
+
     def test_validate_profile_json_output(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

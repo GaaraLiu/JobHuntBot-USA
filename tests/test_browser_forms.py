@@ -4,7 +4,9 @@ import copy
 import inspect
 import io
 import json
+import sys
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -36,6 +38,176 @@ class FakeBackend:
     def inspect(self, url: str, policy: BrowserSessionPolicy) -> BrowserRenderedForm:
         self.calls.append((url, policy))
         return copy.deepcopy(self.snapshot)
+
+
+class FakeRoute:
+    def __init__(self):
+        self.action = ""
+
+    def abort(self, reason):
+        self.action = f"abort:{reason}"
+
+    def continue_(self):
+        self.action = "continue"
+
+
+class FakeRequest:
+    def __init__(self, method="POST", url="https://example.invalid/session?secret=redacted"):
+        self.method = method
+        self.url = url
+
+
+class FakeLocator:
+    def __init__(self, controls):
+        self.controls = controls
+
+    def count(self):
+        return len(self.controls)
+
+    def nth(self, index):
+        return self.controls[index]
+
+
+class FakeControl:
+    def __init__(self, page, label):
+        self.page = page
+        self.label = label
+
+    def is_visible(self):
+        return True
+
+    def click(self):
+        self.page.clicked.append(self.label)
+        if self.label == "Apply Manually":
+            self.page.state = 1
+
+
+class FakeWorkdayPage:
+    def __init__(self, payloads):
+        self.payloads = payloads
+        self.state = 0
+        self.clicked = []
+        self.closed = False
+        self.url = "https://example.wd5.myworkdayjobs.com/External/apply/job/1"
+
+    def set_default_timeout(self, _timeout):
+        pass
+
+    def goto(self, *_args, **_kwargs):
+        pass
+
+    def wait_for_load_state(self, *_args, **_kwargs):
+        pass
+
+    def evaluate(self, _script):
+        return copy.deepcopy(self.payloads[self.state])
+
+    def get_by_role(self, role, name):
+        labels = self.payloads[self.state].get("action_labels", [])
+        controls = [FakeControl(self, label) for label in labels if role == "button" and name.fullmatch(label)]
+        return FakeLocator(controls)
+
+    def on(self, *_args):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+class FakeContext:
+    def __init__(self, page):
+        self.page = page
+        self.closed = False
+        self.route_handler = None
+
+    def new_page(self):
+        return self.page
+
+    def route(self, _pattern, handler):
+        self.route_handler = handler
+
+    def close(self):
+        self.closed = True
+
+
+class FakeBrowser:
+    def __init__(self, context):
+        self.context = context
+        self.closed = False
+
+    def new_context(self, **_kwargs):
+        return self.context
+
+    def close(self):
+        self.closed = True
+
+
+class FakePlaywrightManager:
+    def __init__(self, browser):
+        self.chromium = types.SimpleNamespace(launch=lambda **_kwargs: browser)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+class FakePlaywrightTimeout(Exception):
+    pass
+
+
+def fake_workday_payloads():
+    common = {
+        "page_title": "Fictional Workday Application",
+        "anti_bot": False,
+        "password_input": False,
+        "already_have_account": False,
+        "current_step": "",
+        "step_count": None,
+        "later_steps_unavailable_without_submission": False,
+        "dom_markers": ["data-automation-id workday"],
+        "apply_href": "",
+    }
+    chooser = {
+        **common,
+        "fields": [],
+        "login_wall": False,
+        "headings": ["Start Your Application"],
+        "action_labels": [
+            "Autofill with Resume",
+            "Apply Manually",
+            "Use My Last Application",
+            "Apply With LinkedIn",
+        ],
+        "workday_application_chooser": True,
+    }
+    login = {
+        **common,
+        "fields": [],
+        "login_wall": True,
+        "password_input": True,
+        "headings": ["Sign In"],
+        "action_labels": ["Sign In", "Create Account"],
+        "workday_application_chooser": False,
+    }
+    form = {
+        **common,
+        "fields": [
+            {
+                "field_id": "email",
+                "section_id": "identity",
+                "section_label": "My Information",
+                "label": "Email",
+                "dom_type": "email",
+            }
+        ],
+        "login_wall": False,
+        "headings": ["My Information"],
+        "action_labels": ["Save and Continue"],
+        "workday_application_chooser": False,
+    }
+    return [chooser, login, form]
 
 
 def profile_and_bank():
@@ -106,6 +278,158 @@ class BrowserFormTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 BrowserSessionPolicy(**value)
 
+    def test_manual_auth_requires_headed_browser(self):
+        with self.assertRaisesRegex(ValueError, "--headed"):
+            BrowserSessionPolicy(allow_manual_auth_handoff=True)
+        policy = BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True)
+        self.assertEqual(policy.allowed_http_methods, ("GET", "HEAD", "OPTIONS"))
+
+    def test_workday_chooser_requires_heading_and_exact_manual_action(self):
+        payload = fake_workday_payloads()[0]
+        self.assertTrue(PlaywrightReadOnlyBrowser._is_workday_application_chooser(payload))
+        self.assertFalse(PlaywrightReadOnlyBrowser._is_workday_application_chooser({
+            "headings": ["Job Details"], "action_labels": ["Apply Manually"]
+        }))
+
+    def test_only_exact_apply_manually_is_selected(self):
+        page = FakeWorkdayPage(fake_workday_payloads())
+        self.assertTrue(PlaywrightReadOnlyBrowser._choose_workday_manual_application(page))
+        self.assertEqual(page.clicked, ["Apply Manually"])
+        self.assertNotIn("Apply With LinkedIn", page.clicked)
+        self.assertNotIn("Autofill with Resume", page.clicked)
+        self.assertNotIn("Use My Last Application", page.clicked)
+
+    def test_auth_gate_detects_modern_workday_states_without_broad_text_match(self):
+        cases = (
+            {"password_input": True},
+            {"headings": ["Sign In"]},
+            {"headings": ["Create an Account"]},
+            {"already_have_account": True, "action_labels": ["Log In"]},
+            {"auth_prompt": True, "action_labels": ["Create Account"]},
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                self.assertTrue(PlaywrightReadOnlyBrowser._is_authentication_gate(payload))
+        self.assertFalse(PlaywrightReadOnlyBrowser._is_authentication_gate({
+            "headings": ["Benefits"], "action_labels": ["Sign In to newsletter"]
+        }))
+
+    def test_firewall_is_temporarily_human_controlled_then_rearmed(self):
+        policy = BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True)
+        state = {"manual_auth_active": False}
+        blocked = []
+        route = FakeRoute()
+        PlaywrightReadOnlyBrowser._route_request(route, FakeRequest(), policy, state, blocked)
+        self.assertEqual(route.action, "abort:blockedbyclient")
+        self.assertEqual(blocked[0]["url"], "https://example.invalid/session")
+
+        state["manual_auth_active"] = True
+        route = FakeRoute()
+        PlaywrightReadOnlyBrowser._route_request(route, FakeRequest(), policy, state, blocked)
+        self.assertEqual(route.action, "continue")
+
+        state["manual_auth_active"] = False
+        route = FakeRoute()
+        PlaywrightReadOnlyBrowser._route_request(route, FakeRequest(), policy, state, blocked)
+        self.assertEqual(route.action, "abort:blockedbyclient")
+
+    def test_manual_auth_handoff_resumes_same_session_and_extracts_form(self):
+        page = FakeWorkdayPage(fake_workday_payloads())
+        context = FakeContext(page)
+        browser = FakeBrowser(context)
+        manager = FakePlaywrightManager(browser)
+
+        def confirm(_prompt):
+            page.state = 2
+            return ""
+
+        backend = PlaywrightReadOnlyBrowser(
+            manual_auth_confirmation=confirm,
+            manual_auth_notice=lambda _message: None,
+        )
+        sync_api = types.ModuleType("playwright.sync_api")
+        sync_api.TimeoutError = FakePlaywrightTimeout
+        sync_api.sync_playwright = lambda: manager
+        package = types.ModuleType("playwright")
+        package.sync_api = sync_api
+        with patch.dict(sys.modules, {"playwright": package, "playwright.sync_api": sync_api}):
+            rendered = backend.inspect(
+                page.url,
+                BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True),
+            )
+
+        self.assertEqual(rendered.status, "DETECTED")
+        self.assertEqual([item.field_id for item in rendered.fields], ["email"])
+        self.assertEqual(page.clicked, ["Apply Manually"])
+        self.assertTrue(rendered.metadata["manual_auth_handoff_started"])
+        self.assertTrue(rendered.metadata["manual_auth_resumed"])
+        self.assertTrue(rendered.metadata["manual_auth_firewall_rearmed"])
+        self.assertTrue(page.closed and context.closed and browser.closed)
+
+    def test_manual_auth_disabled_does_not_choose_or_handoff(self):
+        page = FakeWorkdayPage(fake_workday_payloads())
+        context = FakeContext(page)
+        browser = FakeBrowser(context)
+        manager = FakePlaywrightManager(browser)
+        sync_api = types.ModuleType("playwright.sync_api")
+        sync_api.TimeoutError = FakePlaywrightTimeout
+        sync_api.sync_playwright = lambda: manager
+        package = types.ModuleType("playwright")
+        package.sync_api = sync_api
+        with patch.dict(sys.modules, {"playwright": package, "playwright.sync_api": sync_api}):
+            rendered = PlaywrightReadOnlyBrowser().inspect(page.url, BrowserSessionPolicy())
+        self.assertEqual(page.clicked, [])
+        self.assertFalse(rendered.metadata["manual_auth_requested"])
+
+    def test_login_or_captcha_still_present_after_handoff_is_reported_without_loop(self):
+        for blocker, expected in (("login", "LOGIN_REQUIRED"), ("captcha", "BLOCKED_BY_ANTI_BOT")):
+            payloads = fake_workday_payloads()
+            if blocker == "captcha":
+                payloads[1]["login_wall"] = False
+                payloads[1]["password_input"] = False
+                payloads[1]["headings"] = ["Security Challenge"]
+                payloads[1]["anti_bot"] = True
+            page = FakeWorkdayPage(payloads)
+            context = FakeContext(page)
+            browser = FakeBrowser(context)
+            manager = FakePlaywrightManager(browser)
+            sync_api = types.ModuleType("playwright.sync_api")
+            sync_api.TimeoutError = FakePlaywrightTimeout
+            sync_api.sync_playwright = lambda: manager
+            package = types.ModuleType("playwright")
+            package.sync_api = sync_api
+            backend = PlaywrightReadOnlyBrowser(
+                manual_auth_confirmation=lambda _prompt: "",
+                manual_auth_notice=lambda _message: None,
+            )
+            with patch.dict(sys.modules, {"playwright": package, "playwright.sync_api": sync_api}):
+                rendered = backend.inspect(
+                    page.url,
+                    BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True),
+                )
+            with self.subTest(blocker=blocker):
+                self.assertEqual(rendered.status, expected)
+                self.assertTrue(rendered.metadata["manual_auth_firewall_rearmed"])
+
+    def test_manual_auth_eof_cancels_safely(self):
+        backend = PlaywrightReadOnlyBrowser(
+            manual_auth_confirmation=lambda _prompt: (_ for _ in ()).throw(EOFError()),
+            manual_auth_notice=lambda _message: None,
+        )
+        state = {"manual_auth_active": False}
+        result = backend._perform_manual_auth_handoff(object(), state)
+        self.assertTrue(result["manual_auth_cancelled"])
+        self.assertTrue(result["manual_auth_firewall_rearmed"])
+        self.assertFalse(state["manual_auth_active"])
+
+    def test_terminal_auth_prompt_does_not_contaminate_json_stdout(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch("builtins.input", return_value=""), redirect_stdout(stdout), redirect_stderr(stderr):
+            response = PlaywrightReadOnlyBrowser._terminal_confirmation("Authenticate, then continue")
+        self.assertEqual(response, "")
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("Authenticate", stderr.getvalue())
+
     def test_public_url_validation_rejects_local_and_credentials(self):
         for url in ("http://localhost/apply", "http://127.0.0.1/apply", "https://user:secret@example.invalid/apply"):
             with self.subTest(url=url), self.assertRaises(ValueError):
@@ -156,6 +480,22 @@ class BrowserFormTests(unittest.TestCase):
             error_message="",
         )
         self.assertEqual(snapshot.status, "NO_FORM_DETECTED")
+
+    def test_blocked_request_diagnostics_serialize_without_query_data(self):
+        snapshot = PlaywrightReadOnlyBrowser._snapshot(
+            requested_url="https://example.invalid/jobs/123",
+            final_url="https://example.invalid/jobs/123",
+            page_title="Fictional job",
+            payload={"fields": [], "dom_markers": ["workday"]},
+            blocked_requests=[{"method": "POST", "url": "https://example.invalid/session"}],
+            public_network=[],
+            navigation_followed=False,
+            error_message="",
+            session_metadata={"manual_auth_firewall_rearmed": True},
+        )
+        value = json.dumps(snapshot.to_dict())
+        self.assertIn('"blocked_requests"', value)
+        self.assertNotIn("secret=", value)
 
     def test_no_form_status_does_not_generate_mapping_plan(self):
         profile, bank = profile_and_bank()
@@ -337,11 +677,13 @@ class BrowserFormTests(unittest.TestCase):
         self.assertFalse(hasattr(self.backend, "upload"))
         self.assertFalse(hasattr(self.backend, "submit"))
 
-    def test_playwright_backend_contains_no_input_upload_or_click_calls(self):
+    def test_playwright_backend_contains_no_input_upload_or_submission_calls(self):
         source = inspect.getsource(PlaywrightReadOnlyBrowser)
-        for forbidden in (".fill(", ".type(", ".click(", ".check(", "set_input_files", "select_option"):
+        for forbidden in (".fill(", ".type(", ".check(", "set_input_files", "select_option"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
+        self.assertEqual(source.count(".click("), 1)
+        self.assertIn('re.compile(r"^Apply Manually$"', source)
 
     def test_browser_to_phase31_mapping_integration(self):
         profile, bank = profile_and_bank()
@@ -384,6 +726,17 @@ class BrowserFormTests(unittest.TestCase):
             self.assertIn("READ ONLY", stderr.getvalue())
             self.assertIn('"candidate_data_typed": false', stdout.getvalue())
             self.assertTrue(any(output.glob("*_application_form.json")))
+
+    def test_cli_rejects_manual_auth_without_headed(self):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            code = main([
+                "inspect-application-form",
+                "--url", self.snapshot.requested_url,
+                "--manual-auth",
+            ])
+        self.assertEqual(code, 2)
+        self.assertIn("--headed", stderr.getvalue())
 
 
 if __name__ == "__main__":

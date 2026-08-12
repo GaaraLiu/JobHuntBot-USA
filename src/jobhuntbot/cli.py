@@ -328,7 +328,14 @@ def _build_parser() -> argparse.ArgumentParser:
     browser_form.add_argument("--headless", action="store_true", default=True)
     browser_form.add_argument("--headed", action="store_false", dest="headless")
     browser_form.add_argument("--no-follow-apply-link", action="store_false", dest="follow_apply")
-    browser_form.add_argument("--manual-auth", action="store_true", help="Pause for user-controlled authentication when required, then continue in the same browser session.")
+    browser_form.add_argument(
+        "--manual-auth",
+        action="store_true",
+        help=(
+            "Workday only: pause in a headed browser for human-controlled sign-in/MFA/CAPTCHA, "
+            "then restore restricted inspection in the same session; never fills or submits the application."
+        ),
+    )
     browser_form.set_defaults(follow_apply=True)
     browser_form.add_argument("--json", action="store_true", dest="as_json")
 
@@ -863,10 +870,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "inspect-application-form":
-            print(
-                "READ ONLY - NO FORM DATA WILL BE ENTERED, UPLOADED, OR SUBMITTED.",
-                file=sys.stderr,
-            )
+            if args.manual_auth:
+                print(
+                    "MANUAL AUTH MODE - HUMAN AUTHENTICATION MAY SEND AUTH REQUESTS; "
+                    "JOBHUNTBOT WILL NOT ENTER CREDENTIALS, FILL, UPLOAD, OR SUBMIT.",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "READ ONLY - NO FORM DATA WILL BE ENTERED, UPLOADED, OR SUBMITTED.",
+                    file=sys.stderr,
+                )
             if bool(args.application_profile) != bool(args.answer_bank):
                 raise ValueError("Provide both --application-profile and --answer-bank, or neither.")
             job: dict = {}
@@ -886,7 +900,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 headless=args.headless,
                 timeout_ms=args.timeout,
                 follow_public_apply_link=args.follow_apply,
-            allow_manual_auth_handoff=args.manual_auth,
+                allow_manual_auth_handoff=args.manual_auth,
             )
             outcome = BrowserFormExtractionService(PlaywrightReadOnlyBrowser()).inspect(
                 args.url,
@@ -911,11 +925,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             save_private_json(
                 log_path,
                 {
-                    "mode": "READ_ONLY",
+                    "mode": "MANUAL_AUTH_HANDOFF" if args.manual_auth else "READ_ONLY",
+                    "human_controlled_authentication": bool(args.manual_auth),
                     "candidate_data_typed": False,
                     "files_uploaded": 0,
                     "forms_submitted": 0,
                     "blocked_request_count": outcome.rendered.blocked_request_count,
+                    "manual_auth_handoff_started": outcome.rendered.metadata.get("manual_auth_handoff_started", False),
+                    "manual_auth_resumed": outcome.rendered.metadata.get("manual_auth_resumed", False),
+                    "manual_auth_firewall_rearmed": outcome.rendered.metadata.get("manual_auth_firewall_rearmed", False),
                     "public_network_metadata": outcome.rendered.public_network_metadata,
                 },
             )
@@ -937,6 +955,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"ATS: {outcome.application_form.ats}")
                 print(f"Fields: {len(outcome.application_form.fields)}")
                 print(f"Fingerprint: {outcome.application_form.fingerprint}")
+                for blocker in outcome.rendered.blockers:
+                    print(f"Blocker: {blocker}")
                 if outcome.mapping_plan:
                     print(f"Mapping readiness: {outcome.mapping_plan.package_readiness}")
             return 0

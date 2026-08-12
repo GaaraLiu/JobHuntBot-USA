@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from .ats_detection import detect_rendered_ats
@@ -187,10 +188,24 @@ _DOM_EXTRACTION_SCRIPT = r"""
   });
 
   const bodyText = clean(document.body && document.body.innerText).toLowerCase();
+  const headings = Array.from(document.querySelectorAll('h1, h2, h3, [role="heading"]'))
+    .filter(visible).map((el) => clean(el.textContent || el.getAttribute('aria-label'))).filter(Boolean);
+  const dialogLabels = Array.from(document.querySelectorAll('[role="dialog"]'))
+    .filter(visible).map((el) => clean(el.getAttribute('aria-label') || textByIds(el.getAttribute('aria-labelledby'))))
+    .filter(Boolean);
+  const actionLabels = Array.from(document.querySelectorAll('button, a[href], [role="button"], [role="link"]'))
+    .filter(visible).map((el) => clean(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title')))
+    .filter(Boolean);
   const antiBot = Boolean(document.querySelector('iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i], [class*="captcha" i], [id*="captcha" i]')) ||
     /verify you are human|security challenge|unusual traffic/.test(bodyText);
   const passwordInput = Boolean(document.querySelector('input[type="password"]'));
-  const accountWall = passwordInput || /^(sign in|log in|create (an )?account)$/i.test(clean(document.querySelector('h1, h2, [role="heading"]')?.textContent));
+  const authHeading = headings.some((text) => /^(sign in|log in|create (an )?account)$/i.test(text));
+  const alreadyHaveAccount = /already have an account\??/i.test(bodyText);
+  const authPrompt = /sign in to (apply|continue)|create (an )?account to|new to workday|don['’]t have an account|already have an account/i.test(bodyText);
+  const accountWall = passwordInput || authHeading;
+  const startApplication = headings.concat(dialogLabels).some((text) => /^start your application$/i.test(text)) ||
+    /\bstart your application\b/i.test(bodyText);
+  const manualApply = actionLabels.some((text) => /^apply manually$/i.test(text));
   const nextControls = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]'))
     .filter(visible).map((el) => clean(el.textContent || el.getAttribute('value') || el.getAttribute('aria-label')))
     .filter((text) => /^(next|continue|save and continue|review)$/i.test(text));
@@ -203,6 +218,12 @@ _DOM_EXTRACTION_SCRIPT = r"""
     fields: rawFields,
     anti_bot: antiBot,
     login_wall: accountWall,
+    password_input: passwordInput,
+    headings: headings,
+    action_labels: actionLabels,
+    already_have_account: alreadyHaveAccount,
+    auth_prompt: authPrompt,
+    workday_application_chooser: startApplication && manualApply,
     current_step: currentStep,
     step_count: stepNodes.length || null,
     later_steps_unavailable_without_submission: nextControls.length > 0,
@@ -218,10 +239,18 @@ _DOM_EXTRACTION_SCRIPT = r"""
 
 
 class PlaywrightReadOnlyBrowser:
-    """Render public pages without calling any input, upload, or submission API."""
+    """Render public pages without entering application data or submitting."""
 
-    def __init__(self, *, executable_path: str | None = None):
+    def __init__(
+        self,
+        *,
+        executable_path: str | None = None,
+        manual_auth_confirmation: Callable[[str], str] | None = None,
+        manual_auth_notice: Callable[[str], None] | None = None,
+    ):
         self.executable_path = executable_path or os.environ.get("JOBHUNTBOT_PLAYWRIGHT_EXECUTABLE", "")
+        self._manual_auth_confirmation = manual_auth_confirmation or self._terminal_confirmation
+        self._manual_auth_notice = manual_auth_notice or (lambda message: print(message, file=sys.stderr))
 
     def inspect(self, url: str, policy: BrowserSessionPolicy) -> BrowserRenderedForm:
         requested_url = validate_public_browser_url(url)
@@ -241,6 +270,15 @@ class PlaywrightReadOnlyBrowser:
         final_url = requested_url
         page_title = ""
         error_message = ""
+        request_state = {"manual_auth_active": False}
+        session_metadata: dict[str, Any] = {
+            "manual_auth_requested": policy.allow_manual_auth_handoff,
+            "manual_auth_handoff_started": False,
+            "manual_auth_resumed": False,
+            "manual_auth_cancelled": False,
+            "manual_auth_firewall_rearmed": False,
+            "workday_manual_apply_selected": False,
+        }
 
         if self.executable_path and not Path(self.executable_path).is_file():
             raise BrowserDependencyError(f"Configured Chromium executable does not exist: {self.executable_path}")
@@ -266,12 +304,7 @@ class PlaywrightReadOnlyBrowser:
             page.set_default_timeout(policy.timeout_ms)
 
             def route_request(route: Any, request: Any) -> None:
-                method = request.method.upper()
-                if method not in policy.allowed_http_methods:
-                    blocked_requests.append({"method": method, "url": self._sanitize_url(request.url)})
-                    route.abort("blockedbyclient")
-                    return
-                route.continue_()
+                self._route_request(route, request, policy, request_state, blocked_requests)
 
             def observe_response(response: Any) -> None:
                 if len(public_network) >= 50:
@@ -313,30 +346,40 @@ class PlaywrightReadOnlyBrowser:
                             pass
                         navigation_followed = True
                         final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
-                if policy.allow_manual_auth_handoff:
-                    manual_apply = page.get_by_role("button", name=re.compile(r"^Apply Manually$", re.IGNORECASE))
-                    if manual_apply.count() > 0 and manual_apply.first.is_visible():
-                        manual_apply.first.click()
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=min(policy.timeout_ms, 5_000))
-                        except PlaywrightTimeoutError:
-                            pass
-                        navigation_followed = True
+                rendered_ats = detect_rendered_ats(
+                    page.url,
+                    dom_markers=final_payload.get("dom_markers", []),
+                )
+                if (
+                    policy.allow_manual_auth_handoff
+                    and rendered_ats == "workday"
+                    and self._is_workday_application_chooser(final_payload)
+                    and self._choose_workday_manual_application(page)
+                ):
+                    session_metadata["workday_manual_apply_selected"] = True
+                    self._wait_for_render(page, policy, PlaywrightTimeoutError)
+                    navigation_followed = True
+                    final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
+
+                if policy.allow_manual_auth_handoff and rendered_ats == "workday" and (
+                    self._is_authentication_gate(final_payload) or bool(final_payload.get("anti_bot"))
+                ):
+                    handoff = self._perform_manual_auth_handoff(page, request_state)
+                    session_metadata.update(handoff)
+                    if handoff["manual_auth_resumed"]:
+                        self._wait_for_render(page, policy, PlaywrightTimeoutError)
                         final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
+                        session_metadata["login_still_required_after_handoff"] = (
+                            self._is_authentication_gate(final_payload)
+                        )
+                        session_metadata["captcha_still_present_after_handoff"] = bool(
+                            final_payload.get("anti_bot")
+                        )
+                        navigation_followed = True
                 final_url = page.url
                 page_title = str(final_payload.get("page_title", ""))
             except Exception as exc:  # browser errors become explainable status, never fallback interaction
                 error_message = f"{type(exc).__name__}: {exc}"
-                if policy.allow_manual_auth_handoff:
-                    manual_apply = page.get_by_role("button", name=re.compile(r"^Apply Manually$", re.IGNORECASE))
-                    if manual_apply.count() > 0 and manual_apply.first.is_visible():
-                        manual_apply.first.click()
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=min(policy.timeout_ms, 5_000))
-                        except PlaywrightTimeoutError:
-                            pass
-                        navigation_followed = True
-                        final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
                 final_url = page.url or requested_url
             finally:
                 page.close()
@@ -352,7 +395,109 @@ class PlaywrightReadOnlyBrowser:
             public_network=public_network,
             navigation_followed=navigation_followed,
             error_message=error_message,
+            session_metadata=session_metadata,
         )
+
+    @staticmethod
+    def _terminal_confirmation(prompt: str) -> str:
+        print(prompt, file=sys.stderr)
+        return input()
+
+    @staticmethod
+    def _route_request(
+        route: Any,
+        request: Any,
+        policy: BrowserSessionPolicy,
+        request_state: dict[str, bool],
+        blocked_requests: list[dict[str, str]],
+    ) -> None:
+        """Keep automation read-only, except while the human explicitly controls authentication."""
+
+        method = str(request.method).upper()
+        if not request_state.get("manual_auth_active") and method not in policy.allowed_http_methods:
+            blocked_requests.append(
+                {"method": method, "url": PlaywrightReadOnlyBrowser._sanitize_url(request.url)}
+            )
+            route.abort("blockedbyclient")
+            return
+        route.continue_()
+
+    @staticmethod
+    def _wait_for_render(page: Any, policy: BrowserSessionPolicy, timeout_error: type[Exception]) -> None:
+        try:
+            page.wait_for_load_state("networkidle", timeout=min(policy.timeout_ms, 5_000))
+        except timeout_error:
+            pass
+
+    @staticmethod
+    def _is_workday_application_chooser(payload: dict[str, Any]) -> bool:
+        if payload.get("workday_application_chooser"):
+            return True
+        headings = {" ".join(str(item).split()).casefold() for item in payload.get("headings", [])}
+        actions = {" ".join(str(item).split()).casefold() for item in payload.get("action_labels", [])}
+        return "start your application" in headings and "apply manually" in actions
+
+    @staticmethod
+    def _is_authentication_gate(payload: dict[str, Any]) -> bool:
+        if payload.get("login_wall") or payload.get("password_input"):
+            return True
+        headings = {" ".join(str(item).split()).casefold() for item in payload.get("headings", [])}
+        actions = {" ".join(str(item).split()).casefold() for item in payload.get("action_labels", [])}
+        auth_labels = {"sign in", "log in", "create account", "create an account"}
+        return bool(headings & auth_labels) or (
+            bool(payload.get("auth_prompt") or payload.get("already_have_account"))
+            and bool(actions & auth_labels)
+        )
+
+    @staticmethod
+    def _choose_workday_manual_application(page: Any) -> bool:
+        """Click one unambiguous, exact accessible Apply Manually control and nothing else."""
+
+        candidates: list[Any] = []
+        exact_name = re.compile(r"^Apply Manually$", re.IGNORECASE)
+        for role in ("button", "link"):
+            locator = page.get_by_role(role, name=exact_name)
+            for index in range(locator.count()):
+                control = locator.nth(index)
+                if control.is_visible():
+                    candidates.append(control)
+        if len(candidates) != 1:
+            return False
+        candidates[0].click()
+        return True
+
+    def _perform_manual_auth_handoff(
+        self,
+        page: Any,
+        request_state: dict[str, bool],
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "manual_auth_handoff_started": True,
+            "manual_auth_resumed": False,
+            "manual_auth_cancelled": False,
+            "manual_auth_firewall_rearmed": False,
+        }
+        self._manual_auth_notice(
+            "MANUAL AUTHENTICATION HANDOFF: Use only the visible browser to sign in/create an "
+            "account and complete any MFA or CAPTCHA. JobHuntBot will not read or enter credentials. "
+            "Do not fill application fields, upload files, or submit."
+        )
+        request_state["manual_auth_active"] = True
+        try:
+            response = self._manual_auth_confirmation(
+                "When authentication is complete, return here and press Enter to resume "
+                "restricted inspection (or type 'cancel'): "
+            )
+            if str(response or "").strip().casefold() in {"cancel", "q", "quit", "no"}:
+                result["manual_auth_cancelled"] = True
+            else:
+                result["manual_auth_resumed"] = True
+        except (EOFError, KeyboardInterrupt, TimeoutError):
+            result["manual_auth_cancelled"] = True
+        finally:
+            request_state["manual_auth_active"] = False
+            result["manual_auth_firewall_rearmed"] = True
+        return result
 
     @staticmethod
     def _snapshot(
@@ -365,10 +510,12 @@ class PlaywrightReadOnlyBrowser:
         public_network: list[dict[str, Any]],
         navigation_followed: bool,
         error_message: str,
+        session_metadata: dict[str, Any] | None = None,
     ) -> BrowserRenderedForm:
         fields = PlaywrightReadOnlyBrowser._merge_choice_groups(payload.get("fields", []))
-        login_wall = bool(payload.get("login_wall"))
+        login_wall = PlaywrightReadOnlyBrowser._is_authentication_gate(payload)
         anti_bot = bool(payload.get("anti_bot"))
+        session_metadata = dict(session_metadata or {})
         blockers: list[str] = []
         if error_message:
             status = "ERROR"
@@ -378,7 +525,10 @@ class PlaywrightReadOnlyBrowser:
             blockers.append("A CAPTCHA or anti-bot challenge was detected; inspection stopped without bypass.")
         elif login_wall:
             status = "LOGIN_REQUIRED"
-            blockers.append("An account or login wall was detected; no credentials were used.")
+            if session_metadata.get("login_still_required_after_handoff"):
+                blockers.append("Authentication is still required after the manual handoff; no retry was attempted.")
+            else:
+                blockers.append("An account or login wall was detected; no credentials were used.")
         elif fields and PlaywrightReadOnlyBrowser._has_application_evidence([item.to_dict() for item in fields]):
             status = "PARTIAL" if payload.get("later_steps_unavailable_without_submission") else "DETECTED"
         elif fields:
@@ -390,6 +540,8 @@ class PlaywrightReadOnlyBrowser:
         else:
             status = "NO_FORM_DETECTED"
             blockers.append("No browser-rendered application form fields were detected.")
+        if session_metadata.get("manual_auth_cancelled"):
+            blockers.append("Manual authentication was cancelled or unavailable; inspection stopped safely.")
         return BrowserRenderedForm(
             requested_url=requested_url,
             final_url=final_url,
@@ -410,10 +562,12 @@ class PlaywrightReadOnlyBrowser:
                 "dom_markers": payload.get("dom_markers", []),
                 "blocked_request_methods": sorted({item["method"] for item in blocked_requests}),
                 "blocked_requests": blocked_requests,
+                "workday_application_chooser": PlaywrightReadOnlyBrowser._is_workday_application_chooser(payload),
                 "candidate_data_read": False,
                 "candidate_data_typed": False,
                 "file_uploads": 0,
                 "form_submissions": 0,
+                **session_metadata,
             },
         )
 

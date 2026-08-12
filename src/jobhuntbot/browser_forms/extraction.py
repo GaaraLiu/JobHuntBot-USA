@@ -25,9 +25,11 @@ class BrowserExtractionOutcome:
     mapping_plan: ApplicationMappingPlan | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        manual_auth = bool(self.rendered.metadata.get("manual_auth_requested"))
         return {
             "safety_boundary": {
-                "mode": "READ_ONLY",
+                "mode": "MANUAL_AUTH_HANDOFF" if manual_auth else "READ_ONLY",
+                "human_controlled_authentication": manual_auth,
                 "candidate_data_typed": False,
                 "files_uploaded": False,
                 "forms_submitted": False,
@@ -84,6 +86,9 @@ class BrowserFormExtractionService:
                 "blocked_request_count": rendered.blocked_request_count,
                 "blocked_requests": rendered.metadata.get("blocked_requests", []),
                 "dom_markers": rendered.metadata.get("dom_markers", []),
+                "manual_auth_handoff_started": rendered.metadata.get("manual_auth_handoff_started", False),
+                "manual_auth_resumed": rendered.metadata.get("manual_auth_resumed", False),
+                "manual_auth_firewall_rearmed": rendered.metadata.get("manual_auth_firewall_rearmed", False),
                 "input_kind": "browser_rendered_structure",
             },
         )

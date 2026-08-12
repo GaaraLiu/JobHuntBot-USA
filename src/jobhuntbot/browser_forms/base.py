@@ -44,6 +44,8 @@ class BrowserSessionPolicy:
         unsafe = {item.upper() for item in self.allowed_http_methods} - {"GET", "HEAD", "OPTIONS"}
         if unsafe:
             raise ValueError(f"Unsafe browser request methods are not permitted: {sorted(unsafe)}")
+        if self.allow_manual_auth_handoff and self.headless:
+            raise ValueError("Manual authentication requires a visible browser; use --headed with --manual-auth.")
         if any((self.persist_storage_state, self.accept_downloads, self.import_personal_profile,
                 self.allow_file_upload, self.allow_form_input, self.allow_submit)):
             raise ValueError("Phase 3.2 browser policy cannot enable persistence, input, upload, or submission.")

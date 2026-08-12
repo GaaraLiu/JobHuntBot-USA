@@ -4,8 +4,10 @@ Phase 3.0 adds a private application-preparation layer: an APPLY-only queue,
 provenance-aware application profile, deterministic answer bank, unresolved
 question tracking, and reviewable packages. Phase 3.2 adds read-only browser
 form extraction; Phase 3.3 adds explicit, controlled population of allowlisted
-verified fields behind mutation and submission firewalls. It never submits
-applications or uploads files. See
+verified fields behind mutation and submission firewalls and itself never
+submits or uploads. Phase 3.4 adds a separate human-review and state-bound
+approval layer that can upload the exact approved resume and submit only through
+an explicit `execute-application --submit` command. See
 [`docs/application_preparation.md`](docs/application_preparation.md).
 
 **English** below · [中文](#中文说明) 在下方
@@ -92,7 +94,7 @@ See `docs/phase1-architecture.md` and `docs/data-schema.md` for design and schem
 
 ### Discovery and automation boundaries
 
-Phase 1 remains a local scoring core. Phase 2 adds bounded public ATS discovery, a private employer registry, and lead-only LinkedIn/Indeed candidate inputs with deterministic handoff to supported employer ATS postings. Aggregator snippets are never treated as full job descriptions; blocked or unavailable public access is reported without circumvention. Phase 3.2 optionally uses Playwright for read-only form extraction, and Phase 3.3 can populate a small allowlisted set only after an explicit flag. The project does **not** include account login, CAPTCHA bypass, Easy Apply/Indeed Apply, file upload, ATS submission, automatic application submission, automatic resume rewriting, LLM APIs, or a database. See `docs/phase2-job-discovery.md`, `docs/browser-readonly-form-extraction.md`, and `docs/controlled-autofill.md`.
+Phase 1 remains a local scoring core. Phase 2 adds bounded public ATS discovery, a private employer registry, and lead-only LinkedIn/Indeed candidate inputs with deterministic handoff to supported employer ATS postings. Aggregator snippets are never treated as full job descriptions; blocked or unavailable public access is reported without circumvention. Phase 3.2 optionally uses Playwright for read-only form extraction, Phase 3.3 can populate a small allowlisted set only after an explicit flag, and Phase 3.4 permits one reviewed submission only after state-bound approval plus a separate submit flag. The project does **not** include account login, CAPTCHA bypass, Easy Apply/Indeed Apply, unattended bulk submission, automatic resume rewriting, LLM APIs, or a database. See `docs/phase2-job-discovery.md`, `docs/browser-readonly-form-extraction.md`, `docs/controlled-autofill.md`, and `docs/reviewed-submission.md`.
 
 ## Quick Start
 

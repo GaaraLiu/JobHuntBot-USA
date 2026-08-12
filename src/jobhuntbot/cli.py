@@ -49,6 +49,19 @@ from .controlled_fill import (
     load_private_object,
     sanitized_fill_log,
 )
+from .reviewed_submission import (
+    ApprovalService,
+    PlaywrightReviewedSubmissionBrowser,
+    ReviewPackageBuilder,
+    SubmissionContext,
+    SubmissionDependencyError,
+    SubmissionExecutionPolicy,
+    SubmissionExecutionService,
+    SubmissionHistoryStore,
+    SubmissionQueueStatusManager,
+    load_review_package,
+    load_submission_approval,
+)
 from .browser_forms import BrowserRenderedForm
 from .aggregators import (
     AGGREGATOR_SOURCES,
@@ -212,7 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
     queue_list.add_argument("--status", choices=(
         "ALL", "READY_TO_PREPARE", "PREPARING", "WAITING_FOR_USER", "NEEDS_REVIEW",
         "PACKAGE_READY", "READY_FOR_APPLICATION", "IN_PROGRESS", "FAILED",
-        "WITHDRAWN", "SKIPPED"
+        "WITHDRAWN", "SKIPPED", "READY_FOR_USER_REVIEW", "SUBMITTED"
     ), default="ALL")
     queue_list.add_argument("--json", action="store_true", dest="as_json")
 
@@ -355,7 +368,65 @@ def _build_parser() -> argparse.ArgumentParser:
     autofill.add_argument("--headless", action="store_true", default=True)
     autofill.add_argument("--headed", action="store_false", dest="headless")
     autofill.add_argument("--json", action="store_true", dest="as_json")
+
+    review_application = subparsers.add_parser(
+        "review-application",
+        help="Generate a private human review; never fills, uploads, or submits.",
+    )
+    _add_submission_artifact_arguments(review_application)
+    review_application.add_argument(
+        "--queue", type=Path,
+        default=Path("my-materials/application/application_queue.json"),
+    )
+    review_application.add_argument("--json", action="store_true", dest="as_json")
+
+    approve_application = subparsers.add_parser(
+        "approve-application",
+        help="Bind explicit approval to one reviewed application state.",
+    )
+    approve_application.add_argument("--application-id", required=True)
+    approve_application.add_argument("--review-package", required=True, type=Path)
+    approve_application.add_argument("--application-package", required=True, type=Path)
+    approve_application.add_argument("--application-form", required=True, type=Path)
+    approval_scope = approve_application.add_mutually_exclusive_group(required=True)
+    approval_scope.add_argument("--for-fill", action="store_true")
+    approval_scope.add_argument("--for-submission", action="store_true")
+    approve_application.add_argument("--confirm-reviewed", action="store_true")
+    approve_application.add_argument("--manual-item-resolved", action="append", default=[])
+    approve_application.add_argument(
+        "--output-root", type=Path, default=Path("my-materials/application")
+    )
+    approve_application.add_argument("--json", action="store_true", dest="as_json")
+
+    execute_application = subparsers.add_parser(
+        "execute-application",
+        help="Dry-run by default; --submit requires exact APPROVED_FOR_SUBMISSION approval.",
+    )
+    _add_submission_artifact_arguments(execute_application)
+    execute_application.add_argument("--review-package", required=True, type=Path)
+    execute_application.add_argument("--approval", required=True, type=Path)
+    execute_application.add_argument(
+        "--queue", type=Path,
+        default=Path("my-materials/application/application_queue.json"),
+    )
+    execute_application.add_argument("--submit", action="store_true")
+    execute_application.add_argument("--allow-duplicate-submission", action="store_true")
+    execute_application.add_argument("--timeout", type=int, default=30_000)
+    execute_application.add_argument("--headless", action="store_true", default=True)
+    execute_application.add_argument("--headed", action="store_false", dest="headless")
+    execute_application.add_argument("--json", action="store_true", dest="as_json")
     return parser
+
+
+def _add_submission_artifact_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--application-id", required=True)
+    parser.add_argument("--application-package", required=True, type=Path)
+    parser.add_argument("--mapping-plan", required=True, type=Path)
+    parser.add_argument("--application-form", required=True, type=Path)
+    parser.add_argument("--browser-snapshot", required=True, type=Path)
+    parser.add_argument(
+        "--output-root", type=Path, default=Path("my-materials/application")
+    )
 
 
 def _print_profile_validation(path: Path, result, as_json: bool) -> None:
@@ -558,10 +629,173 @@ def _live_registry_checks(targets, discovery_config) -> list[dict]:
     return checks
 
 
+def _phase34_artifacts(args):
+    package = load_private_object(args.application_package)
+    if str(package.get("application_id", "")) != args.application_id:
+        raise ValueError("--application-id does not match the ApplicationPackage.")
+    mapping = load_mapping_plan(args.mapping_plan)
+    form = load_application_form(args.application_form)
+    rendered = BrowserRenderedForm.from_dict(load_private_object(args.browser_snapshot))
+    plan = ControlledFillPlanner().build(package, mapping, form, rendered)
+    return package, mapping, form, rendered, plan
+
+
+def _optional_queue(queue_path: Path, application_id: str):
+    if not queue_path.exists():
+        return None, {}
+    store = ApplicationQueueStore(queue_path)
+    try:
+        return store, store.find(application_id)
+    except ApplicationQueueError:
+        return None, {}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "review-application":
+            print(
+                "REVIEW ONLY - NO BROWSER FILL, FILE UPLOAD, OR SUBMISSION WILL OCCUR.",
+                file=sys.stderr,
+            )
+            package, mapping, form, rendered, plan = _phase34_artifacts(args)
+            queue_store, queue_record = _optional_queue(args.queue, args.application_id)
+            review = ReviewPackageBuilder().build(
+                package, form, mapping, plan, rendered, queue_record=queue_record
+            )
+            review_path = args.output_root / "reviews" / f"{args.application_id}_review.json"
+            save_private_json(review_path, review.to_dict())
+            SubmissionQueueStatusManager(queue_store).mark_review_ready(args.application_id)
+            history = SubmissionHistoryStore(
+                args.output_root / "submissions" / "submission_history.jsonl"
+            )
+            history.append(
+                "review_generated",
+                application_id=review.application_id,
+                job_id=review.job_id,
+                company=str(review.job.get("company", "")),
+                title=str(review.job.get("title", "")),
+                ats=mapping.ats,
+                status=review.review_status,
+            )
+            value = {"review": review.to_dict(), "private_path": str(review_path)}
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Application: {review.application_id}")
+                print(f"Review status: {review.review_status}")
+                print(f"Required unresolved: {review.unresolved_required_count}")
+                print(f"Manual items: {len(review.manual_items)}")
+                print(f"Blockers: {len(review.blockers)}")
+                print("Approval granted: no")
+            return 0
+
+        if args.command == "approve-application":
+            print(
+                "APPROVAL RECORDING ONLY - THIS COMMAND DOES NOT OPEN OR SUBMIT A FORM.",
+                file=sys.stderr,
+            )
+            package = load_private_object(args.application_package)
+            form = load_application_form(args.application_form)
+            review = load_review_package(args.review_package)
+            if args.application_id != review.application_id or args.application_id != package.get("application_id"):
+                raise ValueError("Application ID does not match review/package state.")
+            approval = ApprovalService().create(
+                review,
+                package,
+                form,
+                for_submission=args.for_submission,
+                confirmed_reviewed=args.confirm_reviewed,
+                resolved_manual_item_ids=set(args.manual_item_resolved),
+            )
+            approval_path = args.output_root / "approvals" / f"{args.application_id}_approval.json"
+            save_private_json(approval_path, approval.to_dict())
+            history = SubmissionHistoryStore(
+                args.output_root / "submissions" / "submission_history.jsonl"
+            )
+            history.append(
+                "approval_recorded",
+                application_id=review.application_id,
+                job_id=review.job_id,
+                company=str(review.job.get("company", "")),
+                title=str(review.job.get("title", "")),
+                ats=str(review.job.get("ats", "unknown")),
+                status=approval.approval_status,
+            )
+            value = {"approval": approval.to_dict(), "private_path": str(approval_path)}
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Application: {approval.application_id}")
+                print(f"Approval: {approval.approval_status}")
+                print(f"Form fingerprint: {approval.form_fingerprint}")
+                print(f"Package fingerprint: {approval.package_fingerprint}")
+                print("Submission performed: no")
+            return 0
+
+        if args.command == "execute-application":
+            mode = "EXPLICIT SUBMISSION" if args.submit else "DRY RUN"
+            print(
+                f"{mode} - SUBMISSION REQUIRES EXACT APPROVED_FOR_SUBMISSION STATE.",
+                file=sys.stderr,
+            )
+            package, mapping, form, rendered, plan = _phase34_artifacts(args)
+            stored_review = load_review_package(args.review_package)
+            approval = load_submission_approval(args.approval)
+            if stored_review.application_id != args.application_id or approval.application_id != args.application_id:
+                raise ValueError("Application ID does not match review/approval state.")
+            if approval.review_generated_at != stored_review.generated_at:
+                raise ValueError("Approval is not tied to the supplied ReviewPackage generation.")
+            queue_store, queue_record = _optional_queue(args.queue, args.application_id)
+            current_review = ReviewPackageBuilder().build(
+                package, form, mapping, plan, rendered, queue_record=queue_record
+            )
+            current_review.generated_at = stored_review.generated_at
+            checked_approval = ApprovalService().validate(
+                approval, current_review, package, form
+            )
+            if checked_approval.approval_status == "EXPIRED":
+                save_private_json(args.approval, checked_approval.to_dict())
+            history = SubmissionHistoryStore(
+                args.output_root / "submissions" / "submission_history.jsonl"
+            )
+            backend = PlaywrightReviewedSubmissionBrowser() if args.submit else None
+            context = SubmissionContext(
+                package=dict(package),
+                form=form,
+                mapping=mapping,
+                fill_plan=plan,
+                rendered=rendered,
+                review=current_review,
+            )
+            result = SubmissionExecutionService(
+                backend,
+                history=history,
+                queue=SubmissionQueueStatusManager(queue_store),
+            ).run(
+                context,
+                checked_approval,
+                SubmissionExecutionPolicy(
+                    submit=args.submit,
+                    allow_duplicate_submission=args.allow_duplicate_submission,
+                    timeout_ms=args.timeout,
+                    headless=args.headless,
+                ),
+            )
+            result_path = args.output_root / "submissions" / f"{args.application_id}_submission_result.json"
+            save_private_json(result_path, result.to_dict())
+            value = {"result": result.to_dict(), "private_path": str(result_path)}
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Application: {result.application_id}")
+                print(f"Status: {result.status}")
+                print(f"Submission attempted: {'yes' if result.submission_attempted else 'no'}")
+                print(f"Submission completed: {'yes' if result.submission_completed else 'no'}")
+                print(f"Confirmation detected: {'yes' if result.confirmation_detected else 'no'}")
+            return 0
+
         if args.command == "autofill-application":
             if args.preview and args.execute_fill:
                 raise ValueError("--preview and --execute-fill are mutually exclusive.")
@@ -1023,6 +1257,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ApplicationQueueError,
         BrowserDependencyError,
         FillDependencyError,
+        SubmissionDependencyError,
         OSError,
         ValueError,
     ) as exc:

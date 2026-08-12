@@ -65,6 +65,83 @@ class JobParserTests(unittest.TestCase):
         self.assertEqual(job.remote_policy, "")
         self.assertTrue(job.discovered_date)
 
+    def test_word_parenthesized_experience_formats(self) -> None:
+        cases = [
+            ("three (3) years of experience", 3),
+            ("minimum of five (5) years of experience", 5),
+            ("at least two (2) years of relevant experience", 2),
+            ("one (1) year of experience", 1),
+            ("three (3)+ years of experience", 3),
+        ]
+
+        for phrase, expected in cases:
+            with self.subTest(phrase=phrase):
+                job = self.parse_description(f"Qualifications\n- {phrase}.")
+                self.assertIsNotNone(job.experience_required)
+                self.assertEqual(job.experience_required.minimum_years, expected)
+
+    def test_normal_numeric_plus_experience_still_works(self) -> None:
+        job = self.parse_description("Qualifications\n- 3+ years of experience.")
+
+        self.assertIsNotNone(job.experience_required)
+        self.assertEqual(job.experience_required.minimum_years, 3)
+
+    def test_inconsistent_word_parenthesized_experience_is_unknown(self) -> None:
+        job = self.parse_description("Qualifications\n- three (4) years of experience.")
+
+        self.assertIsNone(job.experience_required)
+
+    def test_what_we_need_to_see_marks_required_skills(self) -> None:
+        job = self.parse_description(
+            """What we need to see:
+- Strong Python programming
+- Experience with Java, a statically typed language
+- Experience deploying machine learning systems in production
+"""
+        )
+
+        for skill in ("python", "java", "machine learning"):
+            self.assertIn(skill, job.skills_required)
+        self.assertEqual(job.job_family, "")
+
+    def test_what_we_need_to_see_heading_is_case_insensitive(self) -> None:
+        job = self.parse_description("wHaT We NeEd To SeE\n- SQL proficiency")
+
+        self.assertIn("sql", job.skills_required)
+
+    def test_preferred_heading_ends_what_we_need_to_see_section(self) -> None:
+        for heading in ("Ways to stand out:", "Ways to stand out from the crowd:"):
+            with self.subTest(heading=heading):
+                job = self.parse_description(
+                    f"""What we need to see:
+- Python
+
+{heading}
+- Kubernetes
+
+Preferred qualifications:
+- Spark
+
+Nice to have:
+- Docker
+"""
+                )
+
+                self.assertIn("python", job.skills_required)
+                for skill in ("kubernetes", "spark", "docker"):
+                    self.assertIn(skill, job.preferred_skills)
+                    self.assertNotIn(skill, job.skills_required)
+
+    def test_what_we_need_to_see_in_prose_is_not_a_heading(self) -> None:
+        job = self.parse_description(
+            """Job Description
+What we need to see in successful candidates is broad Python exposure.
+- Kubernetes supports the platform.
+"""
+        )
+
+        self.assertEqual(job.skills_required, [])
+
     def parse_description(self, description: str, *, title: str = "Analyst"):
         return self.parser.parse(
             RawJob(

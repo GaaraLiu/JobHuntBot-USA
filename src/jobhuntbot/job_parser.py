@@ -39,6 +39,25 @@ _EXPERIENCE_RE = re.compile(
     r"(?P<maximum>\d+(?:\.\d+)?)?\s*\+?\s*years?",
     re.IGNORECASE,
 )
+_WORD_NUMBER_VALUES = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+_WORD_PARENTHESES_EXPERIENCE_RE = re.compile(
+    r"\b(?:(?:minimum\s+of|at\s+least)\s+)?"
+    r"(?P<word>one|two|three|four|five|six|seven|eight|nine|ten)"
+    r"\s*\(\s*(?P<numeric>\d{1,2})\s*\)\s*\+?\s*years?\b"
+    r"(?:\s+of)?\s+(?:relevant\s+)?experience\b",
+    re.IGNORECASE,
+)
 _LICENSE_RE = re.compile(
     r"(?:valid\s+)?([A-Za-z0-9][A-Za-z0-9 .+#/-]{0,45}?(?:license|certification))\s+(?:is\s+)?required",
     re.IGNORECASE,
@@ -76,6 +95,10 @@ _REQUIRED_SECTION_HEADINGS = {
     "what you will do",
     "what you ll do",
 }
+_SKILL_REQUIRED_SECTION_HEADINGS = {
+    *_REQUIRED_SECTION_HEADINGS,
+    "what we need to see",
+}
 _PREFERRED_SECTION_HEADINGS = {
     "preferred",
     "preferred skills",
@@ -83,6 +106,13 @@ _PREFERRED_SECTION_HEADINGS = {
     "desired qualifications",
     "nice to have",
     "bonus qualifications",
+    "ways to stand out",
+    "ways to stand out from the crowd",
+}
+_EXACT_SECTION_HEADINGS = {
+    "what we need to see",
+    "ways to stand out",
+    "ways to stand out from the crowd",
 }
 _GENERAL_SECTION_HEADINGS = {
     "company description",
@@ -205,7 +235,14 @@ def _heading_key(value: str) -> str:
 
 def _matches_heading(value: str, headings: set[str]) -> bool:
     key = _heading_key(value)
-    return any(key == heading or key.startswith(f"{heading} ") for heading in headings)
+    return any(
+        key == heading
+        or (
+            heading not in _EXACT_SECTION_HEADINGS
+            and key.startswith(f"{heading} ")
+        )
+        for heading in headings
+    )
 
 
 def _contains_marker(value: str, markers: list[str]) -> bool:
@@ -365,6 +402,14 @@ class DeterministicJobParser:
 
     def _parse_experience(self, text: str, evidence: dict[str, list[str]]) -> ExperienceRequirement | None:
         candidates: list[tuple[float, float | None, str]] = []
+        for match in _WORD_PARENTHESES_EXPERIENCE_RE.finditer(text):
+            word_value = _WORD_NUMBER_VALUES[match.group("word").casefold()]
+            numeric_value = int(match.group("numeric"))
+            if word_value != numeric_value:
+                continue
+            candidates.append(
+                (float(numeric_value), None, normalize_space(match.group(0)))
+            )
         for match in _EXPERIENCE_RE.finditer(text):
             minimum = float(match.group("minimum"))
             maximum = float(match.group("maximum")) if match.group("maximum") else None
@@ -413,7 +458,7 @@ class DeterministicJobParser:
 
             if _matches_heading(line, _PREFERRED_SECTION_HEADINGS):
                 section = "preferred"
-            elif _matches_heading(line, _REQUIRED_SECTION_HEADINGS):
+            elif _matches_heading(line, _SKILL_REQUIRED_SECTION_HEADINGS):
                 section = "required"
             elif _matches_heading(line, _GENERAL_SECTION_HEADINGS):
                 section = "general"

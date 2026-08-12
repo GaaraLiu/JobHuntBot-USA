@@ -313,10 +313,30 @@ class PlaywrightReadOnlyBrowser:
                             pass
                         navigation_followed = True
                         final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
+                if policy.allow_manual_auth_handoff:
+                    manual_apply = page.get_by_role("button", name=re.compile(r"^Apply Manually$", re.IGNORECASE))
+                    if manual_apply.count() > 0 and manual_apply.first.is_visible():
+                        manual_apply.first.click()
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=min(policy.timeout_ms, 5_000))
+                        except PlaywrightTimeoutError:
+                            pass
+                        navigation_followed = True
+                        final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
                 final_url = page.url
                 page_title = str(final_payload.get("page_title", ""))
             except Exception as exc:  # browser errors become explainable status, never fallback interaction
                 error_message = f"{type(exc).__name__}: {exc}"
+                if policy.allow_manual_auth_handoff:
+                    manual_apply = page.get_by_role("button", name=re.compile(r"^Apply Manually$", re.IGNORECASE))
+                    if manual_apply.count() > 0 and manual_apply.first.is_visible():
+                        manual_apply.first.click()
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=min(policy.timeout_ms, 5_000))
+                        except PlaywrightTimeoutError:
+                            pass
+                        navigation_followed = True
+                        final_payload = page.evaluate(_DOM_EXTRACTION_SCRIPT)
                 final_url = page.url or requested_url
             finally:
                 page.close()
@@ -389,6 +409,7 @@ class PlaywrightReadOnlyBrowser:
             metadata={
                 "dom_markers": payload.get("dom_markers", []),
                 "blocked_request_methods": sorted({item["method"] for item in blocked_requests}),
+                "blocked_requests": blocked_requests,
                 "candidate_data_read": False,
                 "candidate_data_typed": False,
                 "file_uploads": 0,

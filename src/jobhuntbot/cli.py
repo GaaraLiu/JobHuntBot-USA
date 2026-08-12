@@ -328,6 +328,7 @@ def _build_parser() -> argparse.ArgumentParser:
     browser_form.add_argument("--headless", action="store_true", default=True)
     browser_form.add_argument("--headed", action="store_false", dest="headless")
     browser_form.add_argument("--no-follow-apply-link", action="store_false", dest="follow_apply")
+    browser_form.add_argument("--manual-auth", action="store_true", help="Pause for user-controlled authentication when required, then continue in the same browser session.")
     browser_form.set_defaults(follow_apply=True)
     browser_form.add_argument("--json", action="store_true", dest="as_json")
 
@@ -885,6 +886,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 headless=args.headless,
                 timeout_ms=args.timeout,
                 follow_public_apply_link=args.follow_apply,
+            allow_manual_auth_handoff=args.manual_auth,
             )
             outcome = BrowserFormExtractionService(PlaywrightReadOnlyBrowser()).inspect(
                 args.url,

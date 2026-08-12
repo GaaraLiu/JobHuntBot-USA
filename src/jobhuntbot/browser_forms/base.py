@@ -27,6 +27,7 @@ class BrowserSessionPolicy:
     timeout_ms: int = 20_000
     allowed_http_methods: tuple[str, ...] = ("GET", "HEAD", "OPTIONS")
     follow_public_apply_link: bool = True
+    allow_manual_auth_handoff: bool = False
     max_public_navigations: int = 2
     persist_storage_state: bool = False
     accept_downloads: bool = False

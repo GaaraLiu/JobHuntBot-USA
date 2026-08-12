@@ -82,6 +82,8 @@ class BrowserFormExtractionService:
                 "anti_bot": rendered.anti_bot,
                 "apply_navigation_followed": rendered.apply_navigation_followed,
                 "blocked_request_count": rendered.blocked_request_count,
+                "blocked_requests": rendered.metadata.get("blocked_requests", []),
+                "dom_markers": rendered.metadata.get("dom_markers", []),
                 "input_kind": "browser_rendered_structure",
             },
         )

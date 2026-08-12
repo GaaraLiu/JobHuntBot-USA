@@ -31,7 +31,20 @@ _SALARY_RE = re.compile(
     r"(?:\s*(?:-|–|—|to)\s*"
     r"(?:\$|USD\s*)?"
     r"(?P<maximum>\d{2,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?[kK]))?"
-    r"(?:\s*(?:per|/)\s*(?P<period>year|yr|annual|hour|hr|month))?",
+    r"(?:\s*(?:(?:per|/)\s*)?(?P<period>year|yr|annual|annually|hour|hr|hourly|month))?",
+    re.IGNORECASE,
+)
+_SALARY_PREFIX_CONTEXT_RE = re.compile(
+    r"\b(?:(?:base\s+)?salary(?:\s+range)?|compensation\s+range|pay\s+range|"
+    r"base\s+pay|wage\s+range|(?:annual\s+)?base\s+range)\b",
+    re.IGNORECASE,
+)
+_SALARY_SUFFIX_CONTEXT_RE = re.compile(
+    r"\b(?:per\s+(?:year|yr|hour|hr|month)|annually|annual\s+salary|hourly)\b",
+    re.IGNORECASE,
+)
+_NON_COMPENSATION_MONEY_CONTEXT_RE = re.compile(
+    r"\b(?:revenue|market\s+cap(?:italization)?|project\s+budget|investment|sales)\b",
     re.IGNORECASE,
 )
 _EXPERIENCE_RE = re.compile(
@@ -193,6 +206,24 @@ _COLLABORATION_CONTEXT_RE = re.compile(
     r"|\bsupport(?:s|ed|ing)?\b.*\b(?:teams?|departments?|functions?|stakeholders?)\b"
     r")",
     re.IGNORECASE,
+)
+
+_JOB_FAMILY_TITLE_PRECEDENCE = (
+    (
+        re.compile(r"\btransportation\s*/\s*transit\s+planner\b", re.IGNORECASE),
+        "transportation planning",
+    ),
+    (
+        re.compile(r"\btransportation\s+planner\b", re.IGNORECASE),
+        "transportation planning",
+    ),
+    (re.compile(r"\btransit\s+planner\b", re.IGNORECASE), "transportation planning"),
+    (re.compile(r"\burban\s+planner\b", re.IGNORECASE), "urban planning"),
+    (re.compile(r"\btransportation\s+analyst\b", re.IGNORECASE), "transportation analytics"),
+    (re.compile(r"\bplanning\s+analyst\b", re.IGNORECASE), "urban planning"),
+    (re.compile(r"\bmobility\s+analyst\b", re.IGNORECASE), "mobility analytics"),
+    (re.compile(r"\bgis\s+analyst\b", re.IGNORECASE), "gis"),
+    (re.compile(r"\bgeospatial\s+analyst\b", re.IGNORECASE), "geospatial analytics"),
 )
 
 
@@ -385,20 +416,42 @@ class DeterministicJobParser:
         return None
 
     def _parse_salary(self, text: str, evidence: dict[str, list[str]]) -> SalaryRange | None:
-        match = _SALARY_RE.search(text)
-        if not match:
-            return None
-        raw = normalize_space(match.group(0))
-        evidence["salary"] = [raw]
-        period = (match.group("period") or "year").casefold()
-        period = "hour" if period in {"hour", "hr"} else "month" if period == "month" else "year"
-        return SalaryRange(
-            minimum=_salary_number(match.group("minimum")),
-            maximum=_salary_number(match.group("maximum")),
-            currency="USD",
-            period=period,
-            raw_text=raw,
-        )
+        salary_text = text.replace("\u2013", "-").replace("\u2014", "-")
+        for match in _SALARY_RE.finditer(salary_text):
+            line_start = salary_text.rfind("\n", 0, match.start()) + 1
+            line_end = salary_text.find("\n", match.end())
+            line_end = len(salary_text) if line_end < 0 else line_end
+            before = salary_text[max(line_start, match.start() - 100):match.start()]
+            after = salary_text[match.end():min(line_end, match.end() + 60)]
+            local_context = salary_text[
+                max(line_start, match.start() - 60):min(line_end, match.end() + 80)
+            ]
+            if _NON_COMPENSATION_MONEY_CONTEXT_RE.search(local_context):
+                continue
+            if not (
+                _SALARY_PREFIX_CONTEXT_RE.search(before)
+                or _SALARY_SUFFIX_CONTEXT_RE.search(after)
+                or match.group("period")
+            ):
+                continue
+            raw = normalize_space(match.group(0))
+            evidence["salary"] = [raw]
+            period = (match.group("period") or "year").casefold()
+            period = (
+                "hour"
+                if period in {"hour", "hr", "hourly"}
+                else "month"
+                if period == "month"
+                else "year"
+            )
+            return SalaryRange(
+                minimum=_salary_number(match.group("minimum")),
+                maximum=_salary_number(match.group("maximum")),
+                currency="USD",
+                period=period,
+                raw_text=raw,
+            )
+        return None
 
     def _parse_experience(self, text: str, evidence: dict[str, list[str]]) -> ExperienceRequirement | None:
         candidates: list[tuple[float, float | None, str]] = []
@@ -533,6 +586,11 @@ class DeterministicJobParser:
         return found
 
     def _parse_job_family(self, title: str, text: str, evidence: dict[str, list[str]]) -> str:
+        for pattern, family in _JOB_FAMILY_TITLE_PRECEDENCE:
+            match = pattern.search(title)
+            if match:
+                evidence["job_family"] = [f"high-confidence title: {normalize_space(match.group(0))}"]
+                return family
         title_key = normalize_text_key(title)
         role_context = "\n".join(_role_context_lines(text))
         best_family = ""

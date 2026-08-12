@@ -65,6 +65,37 @@ class JobParserTests(unittest.TestCase):
         self.assertEqual(job.remote_policy, "")
         self.assertTrue(job.discovered_date)
 
+    def test_salary_requires_credible_compensation_context(self) -> None:
+        cases = [
+            ("Salary range: $70,000 - $90,000", 70000, 90000, "year"),
+            ("Base salary is $85,000 per year", 85000, None, "year"),
+            ("Compensation range: $80,000–100,000", 80000, 100000, "year"),
+            ("Pay range: $35–45 per hour", 35, 45, "hour"),
+            ("The annual base range for this position is $65,000 to $80,000", 65000, 80000, "year"),
+            ("$90,000 annually", 90000, None, "year"),
+        ]
+
+        for phrase, minimum, maximum, period in cases:
+            with self.subTest(phrase=phrase):
+                job = self.parse_description(phrase)
+                self.assertIsNotNone(job.salary)
+                self.assertEqual(job.salary.minimum, minimum)
+                self.assertEqual(job.salary.maximum, maximum)
+                self.assertEqual(job.salary.period, period)
+
+    def test_business_financial_amounts_are_not_salary(self) -> None:
+        phrases = [
+            "$16.1 billion in annual revenue",
+            "$5 billion market capitalization",
+            "$2 million project budget",
+            "$500 million investment",
+            "company generated $10 billion in sales",
+        ]
+
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(self.parse_description(phrase).salary)
+
     def test_word_parenthesized_experience_formats(self) -> None:
         cases = [
             ("three (3) years of experience", 3),
@@ -281,6 +312,35 @@ Job Responsibilities
         )
 
         self.assertEqual(job.job_family, "data analytics")
+
+    def test_high_confidence_planning_and_geospatial_titles_take_precedence(self) -> None:
+        cases = [
+            ("Transportation/Transit Planner IV", "transportation planning"),
+            ("Transportation Planner", "transportation planning"),
+            ("Transit Planner", "transportation planning"),
+            ("Urban Planner", "urban planning"),
+            ("Transportation Analyst", "transportation analytics"),
+            ("Planning Analyst", "urban planning"),
+            ("Mobility Analyst", "mobility analytics"),
+            ("GIS Analyst", "gis"),
+            ("Geospatial Analyst", "geospatial analytics"),
+        ]
+
+        description = "Job Description\nAnalyze data, build reports, and use Python and Excel."
+        for title, expected_family in cases:
+            with self.subTest(title=title):
+                job = self.parse_description(description, title=title)
+                self.assertEqual(job.job_family, expected_family)
+                self.assertIn("high-confidence title", job.parser_evidence["job_family"][0])
+
+    def test_genuine_data_bi_titles_preserve_data_analytics_family(self) -> None:
+        for title in ("Data Analyst", "BI Analyst", "Business Intelligence Analyst", "Reporting Analyst"):
+            with self.subTest(title=title):
+                job = self.parse_description(
+                    "Job Description\nBuild business intelligence reporting and data analysis dashboards.",
+                    title=title,
+                )
+                self.assertEqual(job.job_family, "data analytics")
 
     def test_incidental_qualification_and_benefit_terms_do_not_create_industries(self) -> None:
         job = self.parse_description(

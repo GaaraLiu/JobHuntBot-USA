@@ -134,7 +134,7 @@ class ScoringTests(unittest.TestCase):
         self.assertTrue(result.seniority_experience_risk.triggered)
         self.assertNotEqual(result.recommendation, Recommendation.APPLY)
 
-    def test_five_year_requirement_without_explicit_seniority_does_not_trigger_safeguard(self) -> None:
+    def test_five_year_requirement_without_explicit_seniority_triggers_generic_safeguard(self) -> None:
         job, result = self.score_strong_match_with_unknown_experience(
             title="Machine Learning Engineer",
             requirement="5+ years",
@@ -144,7 +144,75 @@ class ScoringTests(unittest.TestCase):
         self.assertIsNone(job.seniority)
         self.assertEqual(experience.status, "unknown")
         self.assertFalse(result.seniority_experience_risk.triggered)
+        self.assertTrue(result.experience_requirement_risk.triggered)
+        self.assertTrue(result.to_dict()["experience_requirement_risk"]["triggered"])
+        self.assertEqual(result.recommendation, Recommendation.REVIEW)
+
+    def test_generic_experience_safeguard_handles_eight_and_ten_year_requirements(self) -> None:
+        for years in (8, 10):
+            with self.subTest(years=years):
+                job, result = self.score_strong_match_with_unknown_experience(
+                    title="Machine Learning Engineer",
+                    requirement=f"{years}+ years",
+                )
+                self.assertIsNone(job.seniority)
+                self.assertTrue(result.experience_requirement_risk.triggered)
+                self.assertGreaterEqual(result.overall_score, self.config.thresholds.apply_min)
+                self.assertEqual(result.recommendation, Recommendation.REVIEW)
+
+    def test_four_year_requirement_does_not_trigger_generic_safeguard(self) -> None:
+        _, result = self.score_strong_match_with_unknown_experience(
+            title="Machine Learning Engineer",
+            requirement="4 years",
+        )
+
+        self.assertFalse(result.experience_requirement_risk.triggered)
         self.assertEqual(result.recommendation, Recommendation.APPLY)
+
+    def test_sufficient_confirmed_experience_does_not_trigger_generic_safeguard(self) -> None:
+        job, _ = self.score_strong_match_with_unknown_experience(
+            title="Machine Learning Engineer",
+            requirement="8 years",
+        )
+        self.profile.years_of_experience = 8
+
+        result = self.scorer.score(self.profile, job)
+
+        self.assertFalse(result.experience_requirement_risk.triggered)
+        self.assertEqual(result.recommendation, Recommendation.APPLY)
+
+    def test_confirmed_experience_below_minimum_triggers_generic_safeguard(self) -> None:
+        job, _ = self.score_strong_match_with_unknown_experience(
+            title="Machine Learning Engineer",
+            requirement="8 years",
+        )
+        self.profile.years_of_experience = 3
+
+        result = self.scorer.score(self.profile, job)
+
+        self.assertTrue(result.experience_requirement_risk.triggered)
+        self.assertNotEqual(result.recommendation, Recommendation.APPLY)
+
+    def test_generic_experience_risk_preserves_existing_skip_and_numeric_score(self) -> None:
+        job, result = self.score_strong_match_with_unknown_experience(
+            title="Machine Learning Engineer",
+            requirement="8 years",
+        )
+        self.profile.excluded_roles = ["Machine Learning Engineer"]
+
+        skipped = self.scorer.score(self.profile, job)
+        assessed = [item for item in skipped.components if item.awarded_points is not None]
+        expected_score = round(
+            sum(item.awarded_points or 0 for item in assessed)
+            / sum(item.maximum_points for item in assessed)
+            * 100,
+            1,
+        )
+
+        self.assertTrue(result.experience_requirement_risk.triggered)
+        self.assertTrue(skipped.experience_requirement_risk.triggered)
+        self.assertEqual(skipped.recommendation, Recommendation.SKIP)
+        self.assertEqual(skipped.overall_score, expected_score)
     def test_high_fit_job_is_apply_with_explainable_components(self) -> None:
         job = parsed_job("job_high_fit.txt", title="GIS Data Analyst", location="Boston, MA")
         result = self.scorer.score(self.profile, job)
@@ -233,6 +301,74 @@ class ScoringTests(unittest.TestCase):
         location = next(item for item in result.components if item.component == "location")
         self.assertEqual(location.awarded_points, location.maximum_points)
         self.assertIn("matches", location.reason.casefold())
+
+    def test_nyc_location_aliases_use_configured_local_policy(self) -> None:
+        self.profile.preferred_locations = ["California"]
+        self.profile.raw.setdefault("preferences", {})["location_policy"] = {
+            "local_commutable_areas": ["New York City", "Long Island", "NYC metropolitan area"]
+        }
+        parser = DeterministicJobParser(self.config)
+
+        for location_name in (
+            "New York, NY",
+            "New York City, NY",
+            "NYC",
+            "Manhattan, NY",
+            "US | NY | New York - 100 Example Avenue",
+        ):
+            with self.subTest(location=location_name):
+                job = parser.parse(
+                    RawJob(
+                        title="Data Analyst",
+                        company="Fictional Local Employer",
+                        location=location_name,
+                        job_description="Full-time\nBuild reports.",
+                    )
+                )
+                result = self.scorer.score(self.profile, job)
+                component = next(item for item in result.components if item.component == "location")
+                self.assertEqual(component.awarded_points, component.maximum_points)
+
+    def test_relocation_preference_is_not_scored_as_local_when_policy_is_structured(self) -> None:
+        self.profile.preferred_locations = ["New York City", "California"]
+        self.profile.raw.setdefault("preferences", {})["location_policy"] = {
+            "local_commutable_areas": ["New York City", "Long Island"],
+            "relocation": {"california": "acceptable for sufficiently strong opportunities"},
+        }
+        job = DeterministicJobParser(self.config).parse(
+            RawJob(
+                title="Data Analyst",
+                company="Fictional West Coast Employer",
+                location="San Francisco, CA",
+                job_description="Full-time\nBuild reports.",
+            )
+        )
+
+        result = self.scorer.score(self.profile, job)
+        component = next(item for item in result.components if item.component == "location")
+
+        self.assertEqual(component.awarded_points, 0)
+
+    def test_remote_us_preserves_remote_preference_behavior(self) -> None:
+        self.profile.preferred_locations = ["New York City"]
+        self.profile.remote_preferences = ["remote"]
+        self.profile.raw.setdefault("preferences", {})["location_policy"] = {
+            "local_commutable_areas": ["New York City"],
+            "remote_scope": "United States",
+        }
+        job = DeterministicJobParser(self.config).parse(
+            RawJob(
+                title="Data Analyst",
+                company="Fictional Remote Employer",
+                location="Remote - US",
+                job_description="This is a remote full-time role.",
+            )
+        )
+
+        result = self.scorer.score(self.profile, job)
+        component = next(item for item in result.components if item.component == "location")
+
+        self.assertEqual(component.awarded_points, component.maximum_points)
 
     def test_thresholds_are_loaded_from_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

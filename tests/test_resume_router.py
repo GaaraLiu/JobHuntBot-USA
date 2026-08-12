@@ -7,7 +7,7 @@ from pathlib import Path
 
 from jobhuntbot.config import load_config
 from jobhuntbot.job_parser import DeterministicJobParser
-from jobhuntbot.models import RawJob, ResumeRoutingConfig
+from jobhuntbot.models import RawJob, ResumeRoute, ResumeRoutingConfig
 from jobhuntbot.profile import load_candidate_profile
 from jobhuntbot.resume_router import ResumeRouter, ResumeRoutingError, load_resume_routing
 
@@ -51,6 +51,37 @@ class ResumeRouterTests(unittest.TestCase):
         )
         self.assertEqual(recommendation.resume_id, "general-data")
         self.assertIn("structured", recommendation.reason)
+
+    def test_transportation_planner_family_routes_to_urban_resume(self) -> None:
+        job = self.parser.parse(
+            RawJob(
+                title="Transportation/Transit Planner IV",
+                company="Fictional Infrastructure",
+                location="Columbus, OH",
+                job_description="Job Description\nAnalyze transportation data and build reports with Python.",
+            )
+        )
+        routing = ResumeRoutingConfig(
+            resumes=[
+                ResumeRoute(
+                    resume_id="urban_transport_gis",
+                    file_path="resumes/urban.pdf",
+                    target_job_families=["transportation planning"],
+                ),
+                ResumeRoute(
+                    resume_id="data_bi",
+                    file_path="resumes/data.pdf",
+                    target_job_families=["data analytics"],
+                    keywords=["data"],
+                ),
+            ]
+        )
+
+        recommendation = ResumeRouter(routing).route(self.profile, job)
+
+        self.assertEqual(job.job_family, "transportation planning")
+        self.assertEqual(recommendation.resume_id, "urban_transport_gis")
+        self.assertIn("Job family match: transportation planning", recommendation.evidence)
 
     def test_no_match_and_no_default_returns_no_selection(self) -> None:
         router = ResumeRouter(ResumeRoutingConfig(resumes=[]))

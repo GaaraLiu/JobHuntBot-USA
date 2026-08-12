@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from .config import AppConfig
 from .models import (
     CandidateProfile,
+    ExperienceRequirementRisk,
     NormalizedJob,
     Recommendation,
     ScoreComponent,
@@ -38,6 +39,30 @@ _SENIOR_OR_HIGHER = {
     "vp",
     "executive",
 }
+
+_EXPERIENCE_RISK_MINIMUM_YEARS = 5
+_EXPLICIT_EXPERIENCE_CONTEXT_RE = re.compile(
+    r"\b(?:experience|experienced|minimum|require(?:d|ment|ments)?|qualification|qualifications)\b",
+    re.IGNORECASE,
+)
+
+
+def _location_keys(value: str) -> set[str]:
+    key = normalize_text_key(value)
+    if not key:
+        return set()
+    values = {key}
+    conventional_nyc = re.match(
+        r"^(?:new york(?: city)?(?: ny)?|nyc|manhattan(?: ny)?)(?:\b|$)",
+        key,
+    )
+    ats_nyc = re.match(
+        r"^(?:(?:united states|usa|us) )?ny (?:new york(?: city)?|nyc|manhattan)(?:\b|$)",
+        key,
+    )
+    if conventional_nyc or ats_nyc:
+        values.add("new york city metro")
+    return values
 
 
 @dataclass(slots=True)
@@ -81,6 +106,7 @@ class JobFitScorer:
         context.unknown.extend(blocker_unknowns)
         context.matched.extend(blocker_matches)
         seniority_risk = self._seniority_experience_risk(profile, job)
+        experience_risk = self._experience_requirement_risk(profile, job)
 
         assessed = [item for item in components if item.awarded_points is not None]
         assessed_max = sum(item.maximum_points for item in assessed)
@@ -105,7 +131,9 @@ class JobFitScorer:
             recommendation = Recommendation.SKIP
 
         threshold_recommendation = recommendation
-        if seniority_risk.triggered and recommendation == Recommendation.APPLY:
+        if (
+            seniority_risk.triggered or experience_risk.triggered
+        ) and recommendation == Recommendation.APPLY:
             recommendation = Recommendation.REVIEW
 
         reasoning = [
@@ -137,6 +165,18 @@ class JobFitScorer:
                     "The seniority/experience safeguard is triggered; the existing "
                     f"{recommendation.value} decision remains unchanged."
                 )
+        if experience_risk.triggered:
+            if threshold_recommendation == Recommendation.APPLY:
+                reasoning.append(
+                    "The explicit experience-requirement safeguard caps APPLY at REVIEW "
+                    "because the role requires at least 5 years and the candidate does not "
+                    "demonstrate the stated minimum."
+                )
+            else:
+                reasoning.append(
+                    "The explicit experience-requirement safeguard is triggered; the existing "
+                    f"{recommendation.value} decision remains unchanged."
+                )
 
         return ScoreResult(
             overall_score=overall,
@@ -149,6 +189,67 @@ class JobFitScorer:
             hard_blockers=list(dict.fromkeys(blockers)),
             reasoning=reasoning,
             seniority_experience_risk=seniority_risk,
+            experience_requirement_risk=experience_risk,
+        )
+
+    def _experience_requirement_risk(
+        self,
+        profile: CandidateProfile,
+        job: NormalizedJob,
+    ) -> ExperienceRequirementRisk:
+        requirement = job.experience_required
+        if (
+            requirement is None
+            or requirement.minimum_years is None
+            or requirement.minimum_years < _EXPERIENCE_RISK_MINIMUM_YEARS
+        ):
+            return ExperienceRequirementRisk(
+                reason="The job does not state a minimum experience requirement of at least 5 years."
+            )
+
+        raw = requirement.raw_text.strip()
+        evidence_line = next(
+            (
+                line.strip()
+                for line in job.job_description.splitlines()
+                if raw
+                and normalize_text_key(raw) in normalize_text_key(line)
+                and _EXPLICIT_EXPERIENCE_CONTEXT_RE.search(line)
+            ),
+            "",
+        )
+        if not evidence_line:
+            return ExperienceRequirementRisk(
+                reason="The extracted years value lacks reliable explicit experience-requirement context.",
+                evidence=[raw] if raw else [],
+            )
+
+        required = requirement.minimum_years
+        evidence = [f"Minimum experience: {evidence_line}"]
+        actual = profile.years_of_experience
+        if actual is None:
+            evidence.append("Candidate years of experience: UNKNOWN")
+            return ExperienceRequirementRisk(
+                triggered=True,
+                reason=(
+                    f"Role explicitly requires at least {required:g} years of experience, while "
+                    "candidate total professional experience is UNKNOWN."
+                ),
+                evidence=evidence,
+            )
+        evidence.append(f"Candidate years of experience: {actual:g}")
+        if actual < required:
+            return ExperienceRequirementRisk(
+                triggered=True,
+                reason=(
+                    f"Role explicitly requires at least {required:g} years of experience, while "
+                    f"the candidate reports {actual:g} years."
+                ),
+                evidence=evidence,
+            )
+        return ExperienceRequirementRisk(
+            reason="Candidate-reported experience meets the explicit minimum.",
+            evidence=evidence,
         )
 
     def _seniority_experience_risk(
@@ -368,16 +469,44 @@ class JobFitScorer:
         if not job.location and not job.remote_policy:
             context.unknown.append("Location fit: job location and remote policy are not supplied.")
             return self._component("location", None, "Job location is unknown.", [])
-        if not profile.preferred_locations and not profile.remote_preferences:
+        preferences = profile.raw.get("preferences", {})
+        location_policy = (
+            preferences.get("location_policy", {})
+            if isinstance(preferences, dict)
+            else {}
+        )
+        configured_local = (
+            location_policy.get("local_commutable_areas", [])
+            if isinstance(location_policy, dict)
+            else []
+        )
+        local_preferences = (
+            configured_local
+            if isinstance(configured_local, list) and configured_local
+            else profile.preferred_locations
+        )
+        if not local_preferences and not profile.remote_preferences:
             context.unknown.append("Location fit: candidate location preferences are not supplied.")
-            return self._component("location", None, "Candidate location preferences are unknown.", [job.location, job.remote_policy])
+            return self._component(
+                "location",
+                None,
+                "Candidate location preferences are unknown.",
+                [job.location, job.remote_policy],
+            )
 
-        location_key = normalize_text_key(job.location)
-        preferred_locations = [normalize_text_key(item) for item in profile.preferred_locations]
+        location_keys = _location_keys(job.location)
+        preferred_location_keys = [_location_keys(str(item)) for item in local_preferences]
         location_match = any(
-            item and (item in location_key or location_key in item)
-            for item in preferred_locations
-            if item != "remote"
+            any(
+                candidate_key != "remote"
+                and (
+                    candidate_key in location_key
+                    or location_key in candidate_key
+                )
+                for candidate_key in candidate_keys
+                for location_key in location_keys
+            )
+            for candidate_keys in preferred_location_keys
         )
         remote_preferences = {normalize_text_key(item) for item in profile.remote_preferences}
         remote_match = bool(job.remote_policy and normalize_text_key(job.remote_policy) in remote_preferences)

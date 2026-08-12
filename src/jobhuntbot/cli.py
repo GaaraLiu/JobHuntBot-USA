@@ -480,6 +480,12 @@ def _print_pipeline_result(result: PipelineResult, as_json: bool) -> None:
     print(f"  Reason: {risk.reason}")
     if risk.evidence:
         print(f"  Evidence: {'; '.join(risk.evidence)}")
+    experience_risk = score.experience_requirement_risk
+    print("\nExplicit experience-requirement risk:")
+    print(f"  Triggered: {'yes' if experience_risk.triggered else 'no'}")
+    print(f"  Reason: {experience_risk.reason}")
+    if experience_risk.evidence:
+        print(f"  Evidence: {'; '.join(experience_risk.evidence)}")
     print("\nResume recommendation:")
     if resume.selected:
         print(f"  {resume.resume_id}: {resume.file_path}")

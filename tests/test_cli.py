@@ -48,6 +48,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Unknown requirements:", text)
         self.assertIn("Hard blockers:", text)
         self.assertIn("Seniority/experience risk:", text)
+        self.assertIn("Explicit experience-requirement risk:", text)
         self.assertIn("Resume recommendation:", text)
 
 

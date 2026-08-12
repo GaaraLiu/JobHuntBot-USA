@@ -233,6 +233,13 @@ class SeniorityExperienceRisk:
 
 
 @dataclass(slots=True)
+class ExperienceRequirementRisk:
+    triggered: bool = False
+    reason: str = ""
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ScoreResult:
     overall_score: float
     coverage: float
@@ -245,6 +252,9 @@ class ScoreResult:
     reasoning: list[str] = field(default_factory=list)
     seniority_experience_risk: SeniorityExperienceRisk = field(
         default_factory=SeniorityExperienceRisk
+    )
+    experience_requirement_risk: ExperienceRequirementRisk = field(
+        default_factory=ExperienceRequirementRisk
     )
 
     def to_dict(self) -> dict[str, Any]:

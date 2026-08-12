@@ -33,6 +33,12 @@ from .application_forms.mapping import (
     load_application_form,
     save_private_json,
 )
+from .browser_forms import (
+    BrowserDependencyError,
+    BrowserFormExtractionService,
+    BrowserSessionPolicy,
+    PlaywrightReadOnlyBrowser,
+)
 from .aggregators import (
     AGGREGATOR_SOURCES,
     AggregatorConfigError,
@@ -273,6 +279,33 @@ def _build_parser() -> argparse.ArgumentParser:
     map_form.add_argument("--application-id", default="")
     map_form.add_argument("--output", type=Path)
     map_form.add_argument("--json", action="store_true", dest="as_json")
+
+    browser_form = subparsers.add_parser(
+        "inspect-application-form",
+        help="READ ONLY: render a public application page and extract structure; never fill or submit.",
+    )
+    browser_form.add_argument("--url", required=True)
+    browser_form.add_argument(
+        "--ats", choices=("auto", "unknown", *SUPPORTED_APPLICATION_ATS), default="auto"
+    )
+    browser_form.add_argument("--job-id", default="")
+    browser_form.add_argument("--company", default="")
+    browser_form.add_argument("--title", default="")
+    browser_form.add_argument("--application-id", default="")
+    browser_form.add_argument("--application-profile", type=Path)
+    browser_form.add_argument("--answer-bank", type=Path)
+    browser_form.add_argument("--application-package", type=Path)
+    browser_form.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("my-materials/application/browser_forms"),
+    )
+    browser_form.add_argument("--timeout", type=int, default=20_000, help="Timeout in milliseconds.")
+    browser_form.add_argument("--headless", action="store_true", default=True)
+    browser_form.add_argument("--headed", action="store_false", dest="headless")
+    browser_form.add_argument("--no-follow-apply-link", action="store_false", dest="follow_apply")
+    browser_form.set_defaults(follow_apply=True)
+    browser_form.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -480,6 +513,84 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "inspect-application-form":
+            print(
+                "READ ONLY - NO FORM DATA WILL BE ENTERED, UPLOADED, OR SUBMITTED.",
+                file=sys.stderr,
+            )
+            if bool(args.application_profile) != bool(args.answer_bank):
+                raise ValueError("Provide both --application-profile and --answer-bank, or neither.")
+            job: dict = {}
+            selected_resume: dict = {}
+            application_id = args.application_id
+            if args.application_package:
+                package = json.loads(args.application_package.read_text(encoding="utf-8"))
+                if not isinstance(package, dict):
+                    raise ValueError("Application package root must be an object.")
+                job = dict(package.get("job_snapshot", {}))
+                selected_resume = dict(package.get("selected_resume", {}))
+                application_id = application_id or str(package.get("application_id", ""))
+            profile = load_application_profile(args.application_profile) if args.application_profile else None
+            bank = load_answer_bank(args.answer_bank) if args.answer_bank else None
+            known_source = "" if args.ats == "auto" else args.ats
+            policy = BrowserSessionPolicy(
+                headless=args.headless,
+                timeout_ms=args.timeout,
+                follow_public_apply_link=args.follow_apply,
+            )
+            outcome = BrowserFormExtractionService(PlaywrightReadOnlyBrowser()).inspect(
+                args.url,
+                policy=policy,
+                known_source=known_source,
+                job_id=args.job_id,
+                company=args.company,
+                title=args.title,
+                profile=profile,
+                answer_bank=bank,
+                application_id=application_id,
+                job=job,
+                selected_resume=selected_resume,
+            )
+            stem = args.job_id or outcome.application_form.fingerprint[:16]
+            form_path = args.output_dir / f"{stem}_application_form.json"
+            root = args.output_dir.parent
+            snapshot_path = root / "browser_snapshots" / f"{stem}_browser_snapshot.json"
+            log_path = root / "browser_logs" / f"{stem}_network_metadata.json"
+            save_private_json(form_path, outcome.application_form.to_dict())
+            save_private_json(snapshot_path, outcome.rendered.to_dict())
+            save_private_json(
+                log_path,
+                {
+                    "mode": "READ_ONLY",
+                    "candidate_data_typed": False,
+                    "files_uploaded": 0,
+                    "forms_submitted": 0,
+                    "blocked_request_count": outcome.rendered.blocked_request_count,
+                    "public_network_metadata": outcome.rendered.public_network_metadata,
+                },
+            )
+            mapping_path = None
+            if outcome.mapping_plan:
+                mapping_path = root / "mappings" / f"{stem}_browser_mapping.json"
+                save_private_json(mapping_path, outcome.mapping_plan.to_dict())
+            value = outcome.to_dict()
+            value["private_paths"] = {
+                "application_form": str(form_path),
+                "browser_snapshot": str(snapshot_path),
+                "browser_log": str(log_path),
+                "mapping_plan": str(mapping_path) if mapping_path else None,
+            }
+            if args.as_json:
+                print(json.dumps(value, ensure_ascii=True, indent=2))
+            else:
+                print(f"Browser status: {outcome.rendered.status}")
+                print(f"ATS: {outcome.application_form.ats}")
+                print(f"Fields: {len(outcome.application_form.fields)}")
+                print(f"Fingerprint: {outcome.application_form.fingerprint}")
+                if outcome.mapping_plan:
+                    print(f"Mapping readiness: {outcome.mapping_plan.package_readiness}")
+            return 0
+
         if args.command == "application-form-inspect":
             ats = (
                 detect_application_ats(args.application_url, args.known_source)
@@ -802,6 +913,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         AnswerBankError,
         ApplicationProfileError,
         ApplicationQueueError,
+        BrowserDependencyError,
         OSError,
         ValueError,
     ) as exc:

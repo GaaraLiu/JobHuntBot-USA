@@ -1,0 +1,30 @@
+{
+  "requested_url": "https://jobs.example.invalid/application/role-123",
+  "final_url": "https://jobs.example.invalid/application/role-123",
+  "page_title": "Example Analyst Application",
+  "ats_hint": "unknown",
+  "status": "PARTIAL",
+  "fields": [
+    {"field_id": "first_name", "section_id": "personal", "section_label": "Personal Information", "label": "First Name", "accessible_name": "First Name", "dom_type": "text", "required": true, "locator": "#first_name"},
+    {"field_id": "email", "section_id": "personal", "section_label": "Personal Information", "label": "Email", "accessible_name": "Email", "dom_type": "email", "required": true, "locator": "#email"},
+    {"field_id": "summary", "section_id": "questions", "section_label": "Application Questions", "label": "Professional summary", "dom_type": "textarea", "required": false, "locator": "#summary"},
+    {"field_id": "country", "section_id": "personal", "section_label": "Personal Information", "label": "Country", "dom_type": "select", "required": true, "options": ["Exampleland", "Sample Republic"], "locator": "#country"},
+    {"field_id": "location", "section_id": "personal", "section_label": "Personal Information", "label": "Preferred location", "accessible_name": "Preferred location", "dom_type": "select", "required": false, "options": ["Example City", "Sample City"], "locator": "[role=combobox][aria-label=location]", "metadata": {"role": "combobox"}},
+    {"field_id": "authorized", "section_id": "questions", "section_label": "Application Questions", "label": "Are you legally authorized to work in the United States?", "dom_type": "radio", "required": true, "options": ["Yes", "No"], "locator": "input[name=authorized]"},
+    {"field_id": "newsletter", "section_id": "questions", "section_label": "Application Questions", "label": "Receive optional updates", "dom_type": "checkbox", "required": false, "locator": "#newsletter"},
+    {"field_id": "resume", "section_id": "documents", "section_label": "Documents", "label": "Resume/CV", "dom_type": "file", "required": true, "locator": "#resume", "validation_rules": {"accept": ".pdf,.docx"}},
+    {"field_id": "accuracy", "section_id": "legal", "section_label": "Legal", "label": "I certify that the information is accurate", "dom_type": "checkbox", "required": true, "locator": "#accuracy"},
+    {"field_id": "school", "section_id": "education", "section_label": "Education", "label": "School", "dom_type": "text", "required": false, "repeat_group": "education", "repeat_index": 0, "locator": "#school-0"},
+    {"field_id": "internal", "section_id": "system", "section_label": "System", "label": "Internal routing", "dom_type": "text", "required": false, "visible": false, "hidden": true, "disabled": true, "locator": "#internal"}
+  ],
+  "blockers": [],
+  "current_step": "Step 1 of 2",
+  "step_count": 2,
+  "later_steps_unavailable_without_submission": true,
+  "login_wall": false,
+  "anti_bot": false,
+  "apply_navigation_followed": true,
+  "blocked_request_count": 0,
+  "public_network_metadata": [{"method": "GET", "url": "https://jobs.example.invalid/application/role-123", "status": 200, "resource_type": "document"}],
+  "metadata": {"dom_markers": ["fictional ats-neutral fixture"], "candidate_data_typed": false, "file_uploads": 0, "form_submissions": 0}
+}

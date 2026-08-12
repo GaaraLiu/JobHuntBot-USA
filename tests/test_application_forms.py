@@ -19,6 +19,7 @@ from jobhuntbot.application_forms import (
     detect_application_ats,
 )
 from jobhuntbot.application_forms.mapping import load_application_form, save_private_json
+from jobhuntbot.application_forms.base import normalize_label
 from jobhuntbot.application_profile import load_application_profile
 from jobhuntbot.cli import main
 
@@ -264,9 +265,88 @@ class ApplicationFormTests(unittest.TestCase):
         self.assertEqual((plan.canonical_question_id, plan.mapping_confidence), ("work_authorization_us", "HIGH"))
         self.assertEqual(plan.action, "AUTO_READY_FUTURE")
 
+    def test_required_marker_normalization_is_presentation_only(self):
+        cases = {
+            "Full name✱": "full name",
+            "Email✱": "email",
+            "Phone ✱": "phone",
+            "Email *": "email",
+            "Desired salary (required)": "desired salary",
+            "Phone - required field": "phone",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize_label(raw), expected)
+        self.assertEqual(normalize_label("Is sponsorship required"), "is sponsorship required")
+
+    def test_required_flag_survives_label_cleanup(self):
+        form = create_form_adapter("unknown").parse_json(
+            {"sections": [{"id": "application", "label": "Application", "fields": [
+                {"id": "email", "label": "Email✱", "type": "email", "required": True}
+            ]}]},
+            FormContext("fixture", "unknown"),
+        )
+        field = form.fields[0]
+        self.assertEqual(field.normalized_label, "email")
+        self.assertTrue(field.required)
+
+    def test_basic_identity_and_contact_fields_map_high_confidence(self):
+        cases = {
+            "Full name✱": "legal_full_name",
+            "First name": "legal_first_name",
+            "Middle name": "legal_middle_name",
+            "Last name": "legal_last_name",
+            "Preferred name": "preferred_name",
+            "Email✱": "contact_email",
+            "Phone ✱": "contact_phone",
+        }
+        for label, canonical_id in cases.items():
+            with self.subTest(label=label):
+                plan = self.plan_for(self.field(label))
+                self.assertEqual((plan.canonical_question_id, plan.mapping_confidence), (canonical_id, "HIGH"))
+                self.assertEqual(plan.action, "AUTO_READY_FUTURE")
+
+    def test_full_name_uses_legal_name_composition_not_preferred_name(self):
+        full = self.plan_for(self.field("Full name"))
+        preferred = self.plan_for(self.field("Preferred name"))
+        self.assertEqual(full.canonical_question_id, "legal_full_name")
+        self.assertIn("identity.legal_first_name", full.source_reference)
+        self.assertIn("identity.legal_last_name", full.source_reference)
+        self.assertNotEqual(full.canonical_question_id, preferred.canonical_question_id)
+
     def test_future_sponsorship_is_distinct(self):
         plan = self.plan_for(self.field("Will you now or in the future require sponsorship?", "boolean"))
         self.assertEqual(plan.canonical_question_id, "sponsorship_future")
+
+    def test_sponsorship_now_future_authorization_and_visa_type_stay_distinct(self):
+        cases = {
+            "Are you legally authorized to work in the United States?": "work_authorization_us",
+            "Do you currently require visa sponsorship?": "sponsorship_now",
+            "Will you now or in the future require sponsorship?": "sponsorship_future",
+            "Current visa type": "visa_type",
+        }
+        for label, canonical_id in cases.items():
+            with self.subTest(label=label):
+                plan = self.plan_for(self.field(label, "select"))
+                self.assertEqual(plan.canonical_question_id, canonical_id)
+        visa = self.plan_for(self.field("Current visa type", "select"))
+        self.assertEqual((visa.action, visa.answer_status), ("UNRESOLVED", "no_answer_bank_entry"))
+
+    def test_visa_type_is_not_derived_from_permanent_resident_status(self):
+        value = profile_value()
+        value["work_authorization"]["permanent_resident"] = fact(True, "confirmed", "fictional user")
+        profile_path = self.private / "permanent-resident-profile.json"
+        profile_path.write_text(json.dumps(value), encoding="utf-8")
+        mapper = ApplicationFormMapper(load_application_profile(profile_path), self.bank)
+        plan = mapper.build_plan(self.form([self.field("Current visa type", "select")])).fields[0]
+        self.assertEqual(plan.canonical_question_id, "visa_type")
+        self.assertEqual((plan.action, plan.answer_status), ("UNRESOLVED", "no_answer_bank_entry"))
+
+    def test_legal_group_context_is_manual_and_ambiguous_yes_is_unresolved(self):
+        legal = self.plan_for(self.field("Privacy policy acknowledgment: Yes, I agree", "checkbox"))
+        ambiguous = self.plan_for(self.field("Yes", "radio"))
+        self.assertEqual((legal.action, legal.safety_class), ("MANUAL_ONLY", "MANUAL_ONLY"))
+        self.assertEqual((ambiguous.canonical_question_id, ambiguous.action), ("", "UNRESOLVED"))
 
     def test_citizenship_is_not_collapsed_into_authorization(self):
         plan = self.plan_for(self.field("Are you a U.S. citizen?", "boolean"))

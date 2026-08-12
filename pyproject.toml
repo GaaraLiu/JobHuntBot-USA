@@ -11,6 +11,9 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = []
 
+[project.optional-dependencies]
+browser = ["playwright>=1.48,<2"]
+
 [project.scripts]
 jobhuntbot = "jobhuntbot.cli:main"
 
@@ -23,4 +26,3 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 jobhuntbot = ["resources/*.json"]
-

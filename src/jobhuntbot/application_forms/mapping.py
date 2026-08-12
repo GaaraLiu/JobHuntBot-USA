@@ -34,6 +34,7 @@ _LEGAL_PATTERNS: tuple[tuple[str, str], ...] = (
 )
 
 _HIGH_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("legal_full_name", (r"^(legal )?full name$",)),
     ("legal_first_name", (r"^(legal )?first name$", r"^given name$")),
     ("legal_middle_name", (r"^(legal )?middle name$", r"^middle initial$")),
     ("legal_last_name", (r"^(legal )?(last|family|surname) name$", r"^surname$")),
@@ -59,6 +60,11 @@ _HIGH_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
         r"^will you require sponsorship (now or )?in the future\??$",
     )),
     ("sponsorship_now", (r"^(do|will) you (currently|now) (require|need).*(visa )?sponsorship\??$",)),
+    ("visa_type", (
+        r"^(current )?visa (type|status)\??$",
+        r"^(if yes,? )?what (type|kind) of (employment )?visa.*\??$",
+        r"^(if yes,? )?please (identify|specify) (your )?(current )?visa (type|status)\??$",
+    )),
     ("us_citizen", (r"^are you (a )?(u\.?s\.?|united states) citizen\??$", r"^(u\.?s\.? )?citizenship status$")),
     ("permanent_resident", (r"^are you (a )?(u\.?s\.? )?(lawful )?permanent resident\??$", r"^green card holder\??$")),
     ("security_clearance", (r"^(do you (currently )?(hold|have)|what is your).*(security )?clearance", r"^security clearance( level| status)?$")),
@@ -100,6 +106,14 @@ _PROFILE_PATHS = {
     "linkedin": "links.linkedin",
     "github": "links.github",
     "portfolio": "links.portfolio",
+}
+
+_COMPOSITE_PROFILE_PATHS = {
+    "legal_full_name": (
+        "identity.legal_first_name",
+        "identity.legal_middle_name",
+        "identity.legal_last_name",
+    ),
 }
 
 
@@ -308,6 +322,30 @@ class ApplicationFormMapper:
             if not field.required:
                 return "OPTIONAL_SKIP", "CONFIRM_BEFORE_USE", status, "Optional repeatable value is unavailable.", source
             return "UNRESOLVED", "CONFIRM_BEFORE_USE", status, "Required repeatable value is unavailable in the private profile.", source
+
+        composite_paths = _COMPOSITE_PROFILE_PATHS.get(canonical_id)
+        if composite_paths:
+            required_paths = (composite_paths[0], composite_paths[-1])
+            usable = all(
+                (fact := self.profile.get_fact(path)) is not None
+                and fact.usable
+                and not self.profile.has_unresolved_conflict(path)
+                for path in required_paths
+            )
+            source = "compose(" + ", ".join(
+                [composite_paths[0], f"{composite_paths[1]}?", composite_paths[2]]
+            ) + ")"
+            if usable:
+                return (
+                    "AUTO_READY_FUTURE",
+                    "STATIC_CONFIRMED",
+                    "confirmed_composition",
+                    "Confirmed legal first/last-name facts support a future full-name composition; the optional middle name remains separate.",
+                    source,
+                )
+            if not field.required:
+                return "OPTIONAL_SKIP", "UNKNOWN", "unknown", "Optional legal full-name composition is unavailable.", source
+            return "UNRESOLVED", "UNKNOWN", "unknown", "Required legal first/last-name facts are not both confirmed.", source
 
         profile_path = _PROFILE_PATHS.get(canonical_id)
         if profile_path:

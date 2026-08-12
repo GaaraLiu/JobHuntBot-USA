@@ -16,10 +16,21 @@ def detected_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+_REQUIRED_MARKER_SUFFIX = re.compile(
+    r"(?:"
+    r"\s*[\*\u204e\u2217\u2731\u2733\uff0a]+\s*"
+    r"|\s*[\(\[]\s*required(?:\s+field)?\s*[\)\]]\s*"
+    r"|\s+[-\u2013\u2014:]\s*required(?:\s+field)?\s*"
+    r")+$",
+    re.IGNORECASE,
+)
+
+
 def normalize_label(value: str) -> str:
+    """Normalize labels while removing only unambiguous UI-required suffixes."""
+
     text = re.sub(r"\s+", " ", str(value or "")).strip().casefold()
-    text = re.sub(r"\s*\*\s*$", "", text)
-    return text
+    return _REQUIRED_MARKER_SUFFIX.sub("", text).strip()
 
 
 @dataclass(slots=True)

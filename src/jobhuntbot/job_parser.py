@@ -71,6 +71,17 @@ _WORD_PARENTHESES_EXPERIENCE_RE = re.compile(
     r"(?:\s+of)?\s+(?:relevant\s+)?experience\b",
     re.IGNORECASE,
 )
+_WORD_EXPERIENCE_RE = re.compile(
+    r"\b(?:(?:minimum\s+of|at\s+least)\s+)?"
+    r"(?P<word>one|two|three|four|five|six|seven|eight|nine|ten)"
+    r"\s*\+?\s*years?\b(?:\s+of)?(?:\s+[\w/-]+){0,6}\s+experience\b",
+    re.IGNORECASE,
+)
+_EXPERIENCE_SUBSTITUTION_PREFIX_RE = re.compile(
+    r"\bmay\s+(?:be\s+)?(?:substitute(?:d)?|replace(?:d)?)\s+"
+    r"(?:for\s+)?(?:up\s+to\s+)?$",
+    re.IGNORECASE,
+)
 _LICENSE_RE = re.compile(
     r"(?:valid\s+)?([A-Za-z0-9][A-Za-z0-9 .+#/-]{0,45}?(?:license|certification))\s+(?:is\s+)?required",
     re.IGNORECASE,
@@ -338,6 +349,12 @@ def _apply_skill_context(line: str, skills: list[str]) -> list[str]:
     return values
 
 
+def _is_substitution_experience(text: str, match_start: int) -> bool:
+    prefix = text[max(0, match_start - 200):match_start]
+    boundary = max(prefix.rfind(marker) for marker in ".!?;\n")
+    return bool(_EXPERIENCE_SUBSTITUTION_PREFIX_RE.search(prefix[boundary + 1 :]))
+
+
 class DeterministicJobParser:
     """Extract explicit facts using regular expressions and configured terms."""
 
@@ -456,6 +473,8 @@ class DeterministicJobParser:
     def _parse_experience(self, text: str, evidence: dict[str, list[str]]) -> ExperienceRequirement | None:
         candidates: list[tuple[float, float | None, str]] = []
         for match in _WORD_PARENTHESES_EXPERIENCE_RE.finditer(text):
+            if _is_substitution_experience(text, match.start()):
+                continue
             word_value = _WORD_NUMBER_VALUES[match.group("word").casefold()]
             numeric_value = int(match.group("numeric"))
             if word_value != numeric_value:
@@ -463,7 +482,19 @@ class DeterministicJobParser:
             candidates.append(
                 (float(numeric_value), None, normalize_space(match.group(0)))
             )
+        for match in _WORD_EXPERIENCE_RE.finditer(text):
+            if _is_substitution_experience(text, match.start()):
+                continue
+            candidates.append(
+                (
+                    float(_WORD_NUMBER_VALUES[match.group("word").casefold()]),
+                    None,
+                    normalize_space(match.group(0)),
+                )
+            )
         for match in _EXPERIENCE_RE.finditer(text):
+            if _is_substitution_experience(text, match.start()):
+                continue
             minimum = float(match.group("minimum"))
             maximum = float(match.group("maximum")) if match.group("maximum") else None
             candidates.append((minimum, maximum, normalize_space(match.group(0))))

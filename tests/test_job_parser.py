@@ -122,6 +122,40 @@ class JobParserTests(unittest.TestCase):
 
         self.assertIsNone(job.experience_required)
 
+    def test_substitution_years_do_not_replace_explicit_base_experience(self) -> None:
+        cases = [
+            (
+                "Four years of full-time museum archive experience are required. "
+                "A master's degree may substitute for up to two years of the required experience.",
+                4,
+            ),
+            (
+                "Education may be substituted for 5 years of experience. "
+                "3 years of laboratory coordination experience are required.",
+                3,
+            ),
+            (
+                "A degree may replace 2 years of required experience. "
+                "At least four years of habitat mapping experience are required.",
+                4,
+            ),
+        ]
+
+        for description, expected in cases:
+            with self.subTest(description=description):
+                job = self.parse_description(description)
+                self.assertIsNotNone(job.experience_required)
+                self.assertEqual(job.experience_required.minimum_years, expected)
+
+    def test_substitution_only_experience_remains_unknown(self) -> None:
+        for phrase in (
+            "A master's degree may substitute for up to two years of required experience.",
+            "Education may be substituted for 3 years of experience.",
+            "A degree may replace 4 years of relevant experience.",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(self.parse_description(phrase).experience_required)
+
     def test_what_we_need_to_see_marks_required_skills(self) -> None:
         job = self.parse_description(
             """What we need to see:

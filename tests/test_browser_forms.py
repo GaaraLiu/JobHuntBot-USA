@@ -6,6 +6,7 @@ import io
 import json
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -97,6 +98,9 @@ class FakeWorkdayPage:
         pass
 
     def wait_for_load_state(self, *_args, **_kwargs):
+        pass
+
+    def wait_for_timeout(self, _timeout):
         pass
 
     def evaluate(self, _script):
@@ -332,6 +336,80 @@ class BrowserFormTests(unittest.TestCase):
         route = FakeRoute()
         PlaywrightReadOnlyBrowser._route_request(route, FakeRequest(), policy, state, blocked)
         self.assertEqual(route.action, "abort:blockedbyclient")
+
+    def test_manual_handoff_pumps_routes_and_rearms_before_return(self):
+        policy = BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True)
+        state = {"manual_auth_active": False}
+        blocked = []
+        auth_request_seen = threading.Event()
+
+        class PumpingPage:
+            def wait_for_timeout(self, _timeout):
+                route = FakeRoute()
+                PlaywrightReadOnlyBrowser._route_request(
+                    route,
+                    FakeRequest(url="https://example.invalid/auth?password=must-not-be-logged"),
+                    policy,
+                    state,
+                    blocked,
+                )
+                if route.action == "continue":
+                    auth_request_seen.set()
+
+        def confirm(_prompt):
+            self.assertTrue(auth_request_seen.wait(1))
+            return ""
+
+        backend = PlaywrightReadOnlyBrowser(
+            manual_auth_confirmation=confirm,
+            manual_auth_notice=lambda _message: None,
+        )
+        result = backend._perform_manual_auth_handoff(PumpingPage(), state)
+
+        self.assertTrue(result["manual_auth_resumed"])
+        self.assertTrue(result["manual_auth_firewall_rearmed"])
+        self.assertFalse(state["manual_auth_active"])
+        self.assertEqual(blocked, [])
+
+        route = FakeRoute()
+        PlaywrightReadOnlyBrowser._route_request(route, FakeRequest(), policy, state, blocked)
+        self.assertEqual(route.action, "abort:blockedbyclient")
+
+    def test_manual_handoff_cancellation_rearms_firewall(self):
+        state = {"manual_auth_active": False}
+        backend = PlaywrightReadOnlyBrowser(
+            manual_auth_confirmation=lambda _prompt: "cancel",
+            manual_auth_notice=lambda _message: None,
+        )
+        result = backend._perform_manual_auth_handoff(FakeWorkdayPage(fake_workday_payloads()), state)
+        self.assertTrue(result["manual_auth_cancelled"])
+        self.assertTrue(result["manual_auth_firewall_rearmed"])
+        self.assertFalse(state["manual_auth_active"])
+
+    def test_auth_request_contents_are_never_inspected_or_logged(self):
+        policy = BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True)
+        blocked = []
+        route = FakeRoute()
+        PlaywrightReadOnlyBrowser._route_request(
+            route,
+            FakeRequest(url="https://example.invalid/auth?password=must-not-be-logged"),
+            policy,
+            {"manual_auth_active": True},
+            blocked,
+        )
+        self.assertEqual(route.action, "continue")
+        self.assertEqual(blocked, [])
+        source = inspect.getsource(PlaywrightReadOnlyBrowser._route_request)
+        self.assertNotIn("post_data", source)
+        self.assertNotIn("headers", source)
+        browser_source = inspect.getsource(PlaywrightReadOnlyBrowser)
+        self.assertIn('if request_state.get("manual_auth_active") or len(public_network)', browser_source)
+
+    def test_manual_auth_does_not_enable_application_mutations(self):
+        policy = BrowserSessionPolicy(headless=False, allow_manual_auth_handoff=True)
+        self.assertFalse(policy.allow_form_input)
+        self.assertFalse(policy.allow_file_upload)
+        self.assertFalse(policy.allow_submit)
 
     def test_manual_auth_handoff_resumes_same_session_and_extracts_form(self):
         page = FakeWorkdayPage(fake_workday_payloads())

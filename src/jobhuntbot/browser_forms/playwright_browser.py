@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import queue
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -307,7 +309,7 @@ class PlaywrightReadOnlyBrowser:
                 self._route_request(route, request, policy, request_state, blocked_requests)
 
             def observe_response(response: Any) -> None:
-                if len(public_network) >= 50:
+                if request_state.get("manual_auth_active") or len(public_network) >= 50:
                     return
                 request = response.request
                 if request.resource_type in {"document", "xhr", "fetch"}:
@@ -483,11 +485,31 @@ class PlaywrightReadOnlyBrowser:
             "Do not fill application fields, upload files, or submit."
         )
         request_state["manual_auth_active"] = True
+        confirmation: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+        def read_confirmation() -> None:
+            try:
+                value = self._manual_auth_confirmation(
+                    "When authentication is complete, return here and press Enter to resume "
+                    "restricted inspection (or type 'cancel'): "
+                )
+                confirmation.put((True, value))
+            except BaseException as exc:  # transported to the Playwright-owning thread
+                confirmation.put((False, exc))
+
+        threading.Thread(target=read_confirmation, daemon=True).start()
         try:
-            response = self._manual_auth_confirmation(
-                "When authentication is complete, return here and press Enter to resume "
-                "restricted inspection (or type 'cancel'): "
-            )
+            while True:
+                try:
+                    succeeded, value = confirmation.get_nowait()
+                    break
+                except queue.Empty:
+                    # Sync Playwright dispatches route callbacks while its API is running.
+                    # Keep pumping events while terminal input waits on a separate thread.
+                    page.wait_for_timeout(100)
+            if not succeeded:
+                raise value
+            response = value
             if str(response or "").strip().casefold() in {"cancel", "q", "quit", "no"}:
                 result["manual_auth_cancelled"] = True
             else:

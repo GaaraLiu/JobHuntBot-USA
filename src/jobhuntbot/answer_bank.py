@@ -332,6 +332,33 @@ class AnswerResolver:
         entry: AnswerBankEntry,
         job: Mapping[str, Any],
     ) -> tuple[PreparedAnswer | None, UnresolvedQuestion | None]:
+        if entry.canonical_id == "application_source":
+            stored = entry.value if isinstance(entry.value, Mapping) else {}
+            exact_option = str(stored.get("exact_option", "")).strip()
+            bound_company = str(stored.get("company", "")).strip()
+            bound_job_id = str(stored.get("job_id", "")).strip()
+            job_company = str(job.get("company", "")).strip()
+            job_id = str(job.get("job_id") or job.get("id") or "").strip()
+            binding_matches = (
+                bool(bound_company or bound_job_id)
+                and (not bound_company or bound_company.casefold() == job_company.casefold())
+                and (not bound_job_id or bound_job_id.casefold() == job_id.casefold())
+            )
+            if entry.status == "confirmed" and exact_option and binding_matches:
+                return self._answer(
+                    question,
+                    entry,
+                    exact_option,
+                    list(entry.provenance),
+                    False,
+                ), None
+            return None, self._unresolved(
+                question,
+                entry.canonical_id,
+                "APPLICATION_SOURCE_USER_INPUT",
+                "A confirmed exact ATS option bound to this company or job is required.",
+                entry.safety_class,
+            )
         if entry.canonical_id == "desired_salary":
             policy_fact = self.profile.get_fact("job_preferences.salary_response_policy")
             policy = policy_fact.value if policy_fact and policy_fact.usable and isinstance(policy_fact.value, Mapping) else {}

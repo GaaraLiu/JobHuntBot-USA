@@ -7,9 +7,11 @@
     "preferred_name": {"value": "<OPTIONAL_PREFERRED_NAME>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
     "email": {"value": "<CONFIRM_EMAIL>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
     "phone": {"value": "<CONFIRM_PHONE>", "status": "needs_confirmation", "source": "", "last_verified_at": "", "notes": ""},
+    "phone_country_code": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Use only an explicitly confirmed calling code; do not derive it from citizenship."},
     "current_address": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
     "current_city": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
     "current_state": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
+    "current_county": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": "Do not infer from city or postal code."},
     "postal_code": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""},
     "current_country": {"value": null, "status": "unknown", "source": "", "last_verified_at": "", "notes": ""}
   },

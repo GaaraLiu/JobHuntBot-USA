@@ -24,6 +24,12 @@ class BrowserDependencyError(RuntimeError):
     pass
 
 
+_VISIBLE_REQUIRED_MARKER = re.compile(
+    r"(?:[\*\u204e\u2217\u2731\u2733\uff0a]+|[\(\[]\s*required(?:\s+field)?\s*[\)\]])\s*$",
+    re.IGNORECASE,
+)
+
+
 _DOM_EXTRACTION_SCRIPT = r"""
 () => {
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -651,6 +657,25 @@ class PlaywrightReadOnlyBrowser:
         if context:
             metadata["question_context"] = context
             metadata["question_context_source"] = context_source
+
+        required_evidence = [
+            value.get("label", ""),
+            value.get("accessible_name", ""),
+            *(metadata.get(key, "") for key in (
+                "fieldset_legend",
+                "group_accessible_name",
+                "group_heading",
+                "wrapper_label",
+            )),
+        ]
+        if any(_VISIBLE_REQUIRED_MARKER.search(str(item).strip()) for item in required_evidence):
+            value["required"] = True
+            metadata["required_from_visible_group_label"] = True
+
+        if str(value.get("dom_type", "")).casefold() == "unknown" and str(
+            metadata.get("role", "")
+        ).casefold() == "combobox":
+            value["dom_type"] = "select"
 
         dom_type = str(value.get("dom_type", "")).casefold()
         if dom_type in {"radio", "checkbox"}:

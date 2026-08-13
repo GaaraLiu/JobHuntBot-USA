@@ -41,10 +41,12 @@ _HIGH_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("preferred_name", (r"^(preferred|professional) name$", r"^name you go by$")),
     ("contact_email", (r"^(email|email address)$", r"^primary email$")),
     ("contact_phone", (r"^(phone|phone number|mobile|mobile phone)$",)),
+    ("contact_phone_country_code", (r"^(country phone code|phone country code|country calling code)$",)),
     ("address.street", (r"^(street address|address line 1|address 1)$",)),
     ("address.line_2", (r"^(address line 2|address 2|apartment|suite|unit)$",)),
     ("address.city", (r"^(city|town)$",)),
     ("address.state", (r"^(state|state/province|province|region)$",)),
+    ("address.county", (r"^county$",)),
     ("address.postal_code", (r"^(zip|zip code|postal code)$",)),
     ("address.country", (r"^(country|country/region)$",)),
     ("address.combined", (r"^(current |home |mailing )?address$",)),
@@ -85,7 +87,6 @@ _HIGH_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("race_ethnicity", (r"^(race|ethnicity|race/ethnicity)$",)),
     ("veteran_status", (r"^(protected )?veteran status$", r"^veteran$")),
     ("disability", (r"^(disability|disability status|self.?identification of disability)$",)),
-    ("previously_employed_by_company", (r"^have you (ever )?(previously )?(worked|been employed) (for|by) (us|this company)\??$",)),
     ("related_to_current_employee", (r"^are you related to (a|any) (current )?employee\??$",)),
     ("non_compete", (r"^(are you subject to|do you have).*(non.?compete|restrictive covenant)\??$",)),
     ("government_employment", (r"^(have you|are you).*(government|public official).*(employed|employment|service)\??$",)),
@@ -98,9 +99,11 @@ _PROFILE_PATHS = {
     "preferred_name": "identity.preferred_name",
     "contact_email": "identity.email",
     "contact_phone": "identity.phone",
+    "contact_phone_country_code": "identity.phone_country_code",
     "address.street": "identity.current_address",
     "address.city": "identity.current_city",
     "address.state": "identity.current_state",
+    "address.county": "identity.current_county",
     "address.postal_code": "identity.postal_code",
     "address.country": "identity.current_country",
     "linkedin": "links.linkedin",
@@ -142,6 +145,13 @@ class FieldConceptMapper:
             return "contact_email", "HIGH", "STATIC_CONFIRMED"
         if field.field_type == "phone" and label in {"phone", "phone number", "mobile", "mobile phone"}:
             return "contact_phone", "HIGH", "STATIC_CONFIRMED"
+        if any(re.search(pattern, label) for pattern in (
+            r"^have you (?:ever |previously )?(?:worked for|been employed by) .+\??$",
+            r"^were you previously employed by .+\??$",
+        )):
+            return "previously_employed_by_company", "HIGH", "MANUAL_ONLY"
+        if re.search(r"^(how did you hear about (us|this (job|role|opportunity))|application source)\??$", label):
+            return "application_source", "HIGH", "JOB_DEPENDENT"
         for canonical_id, patterns in _HIGH_PATTERNS:
             if any(re.search(pattern, label) for pattern in patterns):
                 return canonical_id, "HIGH", "UNKNOWN"

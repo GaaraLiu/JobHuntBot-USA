@@ -611,6 +611,42 @@ class BrowserFormTests(unittest.TestCase):
         self.assertEqual(fields[0].options, ["Yes", "No"])
         self.assertTrue(fields[0].required)
 
+    def test_workday_radio_group_inherits_visible_required_marker(self):
+        raw = [
+            {
+                "field_id": f"previous_worker_{index}",
+                "section_id": "my_information",
+                "section_label": "My Information",
+                "label": "",
+                "accessible_name": option,
+                "dom_type": "radio",
+                "required": False,
+                "metadata": {
+                    "control_label": option,
+                    "group_heading": "Have you previously been employed by Fictional Transit?*",
+                    "choice_group_id": "candidateIsPreviousWorker",
+                },
+            }
+            for index, option in enumerate(("Yes", "No"), start=1)
+        ]
+        field = PlaywrightReadOnlyBrowser._merge_choice_groups(raw)[0]
+        self.assertTrue(field.required)
+        self.assertEqual(field.field_id, "candidateIsPreviousWorker")
+        self.assertTrue(field.metadata["required_from_visible_group_label"])
+
+    def test_workday_searchable_chooser_normalizes_to_select(self):
+        raw = {
+            "field_id": "fictional_source",
+            "section_id": "source",
+            "section_label": "Source",
+            "label": "How Did You Hear About Us?*",
+            "dom_type": "unknown",
+            "required": True,
+            "metadata": {"role": "combobox", "tag_name": "div"},
+        }
+        field = PlaywrightReadOnlyBrowser._merge_choice_groups([raw])[0]
+        self.assertEqual(field.dom_type, "select")
+
     def test_custom_card_inherits_question_from_structural_heading(self):
         raw = {
             "field_id": "fictional_card_field",

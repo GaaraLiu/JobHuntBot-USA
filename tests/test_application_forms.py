@@ -47,9 +47,11 @@ def profile_value():
             "preferred_name": fact("Avery Example", "confirmed", "fictional user"),
             "email": fact("avery@example.invalid", "confirmed", "fictional user"),
             "phone": fact("+1 555-0100", "confirmed", "fictional user"),
+            "phone_country_code": fact("+999", "confirmed", "fictional user"),
             "current_address": fact("1 Example Way", "confirmed", "fictional user"),
             "current_city": fact("Example City", "confirmed", "fictional user"),
             "current_state": fact("Example State", "confirmed", "fictional user"),
+            "current_county": fact("Example County", "confirmed", "fictional user"),
             "postal_code": fact("00000", "confirmed", "fictional user"),
             "current_country": fact("Exampleland", "confirmed", "fictional user"),
         },
@@ -421,11 +423,79 @@ class ApplicationFormTests(unittest.TestCase):
         self.assertEqual(plan.action, "USER_CONFIRMATION")
 
     def test_address_decomposition_uses_confirmed_components(self):
-        for label, expected in (("Street address", "address.street"), ("City", "address.city"), ("Postal code", "address.postal_code"), ("Country", "address.country")):
+        for label, expected in (("Street address", "address.street"), ("City", "address.city"), ("County", "address.county"), ("Postal code", "address.postal_code"), ("Country", "address.country")):
             with self.subTest(label=label):
                 plan = self.plan_for(self.field(label))
                 self.assertEqual(plan.canonical_question_id, expected)
                 self.assertEqual(plan.action, "AUTO_READY_FUTURE")
+
+    def test_country_phone_code_uses_only_explicit_confirmed_fact(self):
+        plan = self.plan_for(self.field("Country Phone Code", "select"))
+        self.assertEqual(plan.canonical_question_id, "contact_phone_country_code")
+        self.assertEqual((plan.action, plan.source_reference), ("AUTO_READY_FUTURE", "identity.phone_country_code"))
+
+    def test_county_and_phone_code_are_not_inferred_from_other_identity_facts(self):
+        value = profile_value()
+        value["identity"].pop("current_county")
+        value["identity"].pop("phone_country_code")
+        path = self.private / "missing-local-components.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        mapper = ApplicationFormMapper(load_application_profile(path), self.bank)
+        plans = mapper.build_plan(self.form([
+            self.field("County", field_id="county"),
+            self.field("Country Phone Code", "select", field_id="calling-code"),
+        ])).fields
+        self.assertEqual([item.canonical_question_id for item in plans], ["address.county", "contact_phone_country_code"])
+        self.assertTrue(all(item.action == "UNRESOLVED" for item in plans))
+
+    def test_company_named_previous_employment_question_is_manual_only(self):
+        for label in (
+            "Have you previously been employed by Fictional Transit?",
+            "Have you ever worked for Fictional Transit?",
+            "Were you previously employed by Fictional Transit?",
+        ):
+            with self.subTest(label=label):
+                plan = self.plan_for(self.field(label, "radio"))
+                self.assertEqual(plan.canonical_question_id, "previously_employed_by_company")
+                self.assertEqual((plan.action, plan.safety_class), ("MANUAL_ONLY", "MANUAL_ONLY"))
+
+    def test_application_source_is_job_bound_and_not_reusable(self):
+        value = bank_value()
+        value["entries"].append(entry(
+            "application_source",
+            answer_type="JOB_DEPENDENT",
+            value={
+                "exact_option": "Fictional Careers",
+                "company": "Fictional Transit",
+                "job_id": "FIC-123",
+                "semantic_category": "COMPANY_CAREERS_SITE",
+            },
+            status="confirmed",
+            provenance=["explicit fictional user confirmation"],
+            reusable=False,
+            job_dependent=True,
+            requires_user_confirmation=True,
+            allowed_auto_fill=False,
+            safety_class="JOB_DEPENDENT",
+        ))
+        path = self.private / "source-bank.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        mapper = ApplicationFormMapper(self.profile, load_answer_bank(path))
+        field = self.field("How Did You Hear About Us?", "select")
+
+        matched = mapper.build_plan(
+            self.form([field]),
+            job={"company": "Fictional Transit", "job_id": "FIC-123"},
+        ).fields[0]
+        self.assertEqual(matched.canonical_question_id, "application_source")
+        self.assertEqual((matched.action, matched.safety_class), ("USER_CONFIRMATION", "JOB_DEPENDENT"))
+
+        unrelated = mapper.build_plan(
+            self.form([self.field("How Did You Hear About Us?", "select")]),
+            job={"company": "Other Company", "job_id": "OTHER-1"},
+        ).fields[0]
+        self.assertEqual(unrelated.canonical_question_id, "application_source")
+        self.assertEqual((unrelated.action, unrelated.answer_status), ("UNRESOLVED", "APPLICATION_SOURCE_USER_INPUT"))
 
     def test_unmapped_required_custom_question_is_unresolved(self):
         plan = self.plan_for(self.field("Describe your favorite imaginary constellation", "textarea"))
